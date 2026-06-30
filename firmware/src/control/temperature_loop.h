@@ -35,8 +35,23 @@ public:
     // sensor wiring). Does not modify the setpoint.
     void clearFault();
 
+    // Open-loop step-response bench. Bypasses the PID and drives the heater
+    // at the given duty fraction (0..1) for up to `durationMs`, aborting
+    // early on any of: temperature reaches `abortTempC`, sensor fault, the
+    // hard cut at `profile.thermal.maxSafeTempC` (which still applies), or
+    // an explicit `stopTuning()` call. Refuses to start when the loop is
+    // already faulted; `abortTempC` is clamped strictly below the hard cut.
+    void startTuning(uint32_t nowMs, float duty, uint32_t durationMs, float abortTempC);
+    void stopTuning();
+    bool tuningActive() const { return tuning_.active; }
+    float tuningDuty() const { return tuning_.duty; }
+    uint32_t tuningElapsedMs(uint32_t nowMs) const;
+    uint32_t tuningDurationMs() const { return tuning_.durationMs; }
+    float tuningAbortTempC() const { return tuning_.abortTempC; }
+
 private:
     void runPidIfDue(uint32_t nowMs);
+    void runTuningStep(uint32_t nowMs);
     void updateSlowPwm(uint32_t nowMs);
     void latchFault(const char* reason);
 
@@ -52,6 +67,14 @@ private:
     uint32_t lastPidMs_ = 0;
     uint32_t windowStartMs_ = 0;
     uint32_t windowOnTimeMs_ = 0;
+
+    struct TuningState {
+        bool active = false;
+        float duty = 0.0f;
+        uint32_t durationMs = 0;
+        float abortTempC = 0.0f;
+        uint32_t startMs = 0;
+    } tuning_;
 };
 
 }  // namespace esp32esso::control
