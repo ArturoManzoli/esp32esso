@@ -57,6 +57,9 @@ venv/
 .env
 .env.local
 
+### Tools / tuning runs ###
+tools/tuning/data/
+
 ### Logs and temp files ###
 *.log
 /tmp/
