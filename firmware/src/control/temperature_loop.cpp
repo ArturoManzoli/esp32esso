@@ -31,7 +31,11 @@ void TemperatureLoop::tick(uint32_t nowMs) {
         profile_->brewTempSensor == nullptr) {
         return;
     }
-    runPidIfDue(nowMs);
+    if (tuning_.active) {
+        runTuningStep(nowMs);
+    } else {
+        runPidIfDue(nowMs);
+    }
     updateSlowPwm(nowMs);
 }
 
@@ -88,6 +92,79 @@ void TemperatureLoop::runPidIfDue(uint32_t nowMs) {
         return;  // latched until operator clears
     }
     lastOutput_ = pid_.update(setpoint_, temp, dtSec);
+}
+
+void TemperatureLoop::startTuning(uint32_t nowMs,
+                                  float duty,
+                                  uint32_t durationMs,
+                                  float abortTempC) {
+    if (profile_ == nullptr || profile_->heaterRelay == nullptr ||
+        profile_->brewTempSensor == nullptr) {
+        return;
+    }
+    if (faulted_) {
+        return;  // refuse to start while the safety latch is set
+    }
+    if (duty < 0.0f) duty = 0.0f;
+    if (duty > 1.0f) duty = 1.0f;
+    const float hardCut = profile_->thermal.maxSafeTempC;
+    if (abortTempC >= hardCut) {
+        abortTempC = hardCut - 1.0f;
+    }
+    tuning_.active = true;
+    tuning_.duty = duty;
+    tuning_.durationMs = durationMs;
+    tuning_.abortTempC = abortTempC;
+    tuning_.startMs = nowMs;
+    lastPidMs_ = 0;
+    windowStartMs_ = 0;
+    windowOnTimeMs_ = 0;
+    lastOutput_ = duty;
+}
+
+void TemperatureLoop::stopTuning() {
+    tuning_.active = false;
+    lastOutput_ = 0.0f;
+    windowOnTimeMs_ = 0;
+    if (profile_ && profile_->heaterRelay) {
+        profile_->heaterRelay->set(false);
+    }
+    pid_.reset();
+}
+
+uint32_t TemperatureLoop::tuningElapsedMs(uint32_t nowMs) const {
+    if (!tuning_.active) return 0;
+    return nowMs - tuning_.startMs;
+}
+
+void TemperatureLoop::runTuningStep(uint32_t nowMs) {
+    if (lastPidMs_ != 0 && (nowMs - lastPidMs_) < kPidPeriodMs) {
+        return;
+    }
+    lastPidMs_ = nowMs;
+
+    const float temp = profile_->brewTempSensor->readCelsius();
+    lastTempC_ = temp;
+
+    if (!profile_->brewTempSensor->ok() || std::isnan(temp)) {
+        latchFault("sensor-fault");
+        tuning_.active = false;
+        return;
+    }
+    if (temp >= profile_->thermal.maxSafeTempC) {
+        latchFault("overtemp");
+        tuning_.active = false;
+        return;
+    }
+    if (temp >= tuning_.abortTempC) {
+        stopTuning();
+        return;
+    }
+    if ((nowMs - tuning_.startMs) >= tuning_.durationMs) {
+        stopTuning();
+        return;
+    }
+    lastOutput_ = tuning_.duty;
 }
 
 void TemperatureLoop::updateSlowPwm(uint32_t nowMs) {
