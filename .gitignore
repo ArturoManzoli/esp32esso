@@ -1,0 +1,62 @@
+### PlatformIO / firmware ###
+firmware/.pio/
+firmware/.pioenvs/
+firmware/.piolibdeps/
+firmware/.vscode/
+firmware/build/
+firmware/.cache/
+*.elf
+*.bin
+*.hex
+*.map
+*.uf2
+
+### Android / Gradle (app-android, added in Stage 2) ###
+app-android/.gradle/
+app-android/build/
+app-android/local.properties
+app-android/.idea/
+app-android/captures/
+app-android/.cxx/
+app-android/app/build/
+*.apk
+*.aab
+*.aar
+*.jks
+*.keystore
+*.iml
+
+### KiCad (hardware/) ###
+hardware/**/*-backups/
+hardware/**/*.kicad_prl
+hardware/**/*.lck
+hardware/**/_autosave-*.kicad_sch
+hardware/**/_autosave-*.kicad_pcb
+hardware/**/fp-info-cache
+
+### docs site builds ###
+docs/_site/
+docs/.docsify/
+docs/node_modules/
+
+### OS / editor ###
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.code-workspace
+
+### Python / tooling caches ###
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.local
+
+### Logs and temp files ###
+*.log
+/tmp/
