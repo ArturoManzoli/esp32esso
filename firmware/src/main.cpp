@@ -56,6 +56,7 @@ void setup() {
 
     const auto& profile = esp32esso::profile::activeProfile();
     printBanner(profile);
+    esp32esso::profile::initActiveProfilePeripherals();
     g_tempLoop.begin(profile);
 }
 

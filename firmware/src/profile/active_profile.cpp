@@ -46,6 +46,10 @@ const MachineProfile& activeProfile() {
     return kStubProfile;
 }
 
+void initActiveProfilePeripherals() {
+    // Stub profile has no peripherals; intentionally empty.
+}
+
 #endif  // ESP32ESSO_PROFILE_STUB
 
 }  // namespace esp32esso::profile

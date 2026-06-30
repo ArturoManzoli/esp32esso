@@ -61,8 +61,13 @@ struct MachineProfile {
 };
 
 // Selected at link time by the build env via the matching profile env-flag.
-// Defined exactly once in src/profile/active_profile.cpp by the chosen
-// profile's translation unit.
+// Defined exactly once across the src/profile/*.cpp translation units, each
+// of which is wrapped in an `#if defined(ESP32ESSO_PROFILE_<NAME>)` guard.
 extern const MachineProfile& activeProfile();
+
+// Performs any one-time hardware initialisation needed by the active
+// profile (SPI bus, pinMode, etc.). Called from setup() exactly once,
+// after Serial.begin().
+extern void initActiveProfilePeripherals();
 
 }  // namespace esp32esso::profile
