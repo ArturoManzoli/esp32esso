@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Safety or security issue
+    url: https://github.com/ArturoManzoli/esp32esso/security/advisories/new
+    about: Anything that could put a user's safety at risk should be reported privately, never as a public issue. See SECURITY.md.
+  - name: General questions
+    url: https://github.com/ArturoManzoli/esp32esso/discussions
+    about: Open-ended questions and "is this machine compatible?" belong in Discussions.
