@@ -70,16 +70,86 @@ Wiring diagram lives at `hardware/oster-xpert/tier-1-wiring.md`.
 
 ## PID tuning procedure (post-Tier-1 install)
 
-The defaults in `firmware/src/profile/oster_xpert.cpp` are conservative
-guesses. To tune for a specific unit:
+The defaults in `firmware/src/profile/oster_xpert.cpp` (`Kp=0.10`,
+`Ki=0.005`, `Kd=1.5`, window 1000 ms) are conservative first-cut values
+chosen before the first unit was benched. Replace them with values fitted
+to your specific machine using the open-loop step-response procedure
+below.
 
-1. Power on with the existing defaults (`Kp=0.10`, `Ki=0.005`, `Kd=1.5`,
-   window 1000 ms).
-2. Capture the open-loop step response by setting the heater to 100% for
-   a short, fixed time (e.g. 5 s) from a cold start and recording the
-   thermocouple curve over Serial telemetry.
-3. Apply Ziegler-Nichols or relay-feedback tuning offline.
-4. Update the gains in the machine profile and re-flash.
+### Safety checklist (before the bench)
+
+> [!CAUTION]
+> The bench drives the heater at 50 % duty open-loop for up to 120
+> seconds. If the SSR fails closed, the safety-cut at `maxSafeTempC =
+> 160 C` is the only thing standing between your thermoblock and a dry
+> boil. Confirm every item below **before** typing the start command.
+
+- [ ] the stock brew thermostat is still wired in series with the SSR
+  (see `hardware/oster-xpert/tier-1-wiring.md`) so it still trips on
+  runaway temperature
+- [ ] the thermocouple bead is firmly clamped to the thermoblock and
+  readings track room temperature when the heater is off
+- [ ] the firmware reports `fault=""` and a sane temperature on the
+  serial monitor at idle
+- [ ] the water reservoir is **full** so the thermoblock does not boil
+  dry mid-bench
+- [ ] a fire extinguisher rated for electrical fires is within reach
+- [ ] you can physically yank the IEC power lead in under one second
+
+### Bench protocol
+
+The bench tooling lives in [`tools/tuning/`](../../tools/tuning/). Install
+the host requirements once: `pip install -r tools/requirements.txt`.
+
+1. Start the machine cold (let it sit unpowered for at least 30 minutes
+   after any prior shot so the thermoblock is at room temperature).
+2. Connect USB-serial to the ESP32-S3 and confirm the firmware banner +
+   one steady telemetry line in a serial monitor. Close the monitor.
+3. From the repo root, launch the capture script with the run timestamped
+   under the gitignored data folder:
+
+   ```bash
+   mkdir -p tools/tuning/data
+   python3 tools/tuning/capture.py \
+       --port /dev/ttyACM0 \
+       --out tools/tuning/data/step-$(date +%Y%m%dT%H%M%S).csv
+   ```
+
+   The script claims the port, settles for ~1.5 s, sends the `s` command
+   to the firmware, and records every telemetry line. The firmware emits
+   at 5 Hz while tuning, then drops back to 1 Hz when the bench ends.
+4. Watch the live output. The bench self-terminates when any of these
+   happen and the script exits after a short cooldown:
+   - 120 s elapses
+   - brew temperature reaches the 140 C bench-abort threshold
+   - the safety latch fires (sensor fault or 160 C hard cut)
+   - you press `Ctrl-C` (the script sends `q` to abort before closing)
+5. Fit the FOPDT model and derive PID gain suggestions:
+
+   ```bash
+   python3 tools/tuning/analyze.py \
+       --in tools/tuning/data/step-<timestamp>.csv \
+       --duty 0.50 \
+       --out-json tools/tuning/data/step-<timestamp>.json \
+       --out-plot tools/tuning/data/step-<timestamp>.png
+   ```
+
+   The script prints the fitted process gain K (deg C per duty fraction),
+   time constant tau, and dead time L, then the Ziegler-Nichols and
+   Cohen-Coon PID gain suggestions.
+6. Inspect the PNG plot. A clean fit should hug the measured curve with
+   no systematic drift; a poor fit usually means the bench was aborted
+   too early to resolve the time constant (rerun with a higher abort
+   temperature or a longer duration, **never** with the safety cut
+   removed).
+7. Update `firmware/src/profile/oster_xpert.cpp` with the chosen gains
+   (Ziegler-Nichols is the conservative starting point; Cohen-Coon is
+   more aggressive but tracks setpoints faster). Re-flash and verify in
+   closed-loop with a setpoint near 93 C: temperature should approach
+   setpoint with bounded overshoot and settle within a couple of cycles.
+8. Once you've picked a winning run, copy the plot and the derived JSON
+   into the committed tree (e.g. under `hardware/oster-xpert/`) so the
+   tuning provenance is preserved. The raw CSVs stay gitignored.
 
 ## Compatibility caveats specific to this machine
 
