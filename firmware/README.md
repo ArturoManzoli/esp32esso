@@ -28,6 +28,9 @@ ESP32-S3.
 | `esp32-s3-dev` | ESP32-S3 | Stub profile on the S3. |
 | `esp32-s3-oster-xpert` | ESP32-S3 | Oster Xpert on the S3 (recommended for Tier 2-4). |
 
+Tier 1 BLE (live state + setpoint) is enabled on the `*-oster-xpert` envs.
+See [`protocol/ble/tier1.md`](../protocol/ble/tier1.md).
+
 ## Building
 
 ```bash

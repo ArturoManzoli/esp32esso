@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "board/board_config.h"
+#include "ble/tier1_service.h"
 #include "control/temperature_loop.h"
 #include "profile/machine_profile.h"
 
@@ -124,12 +125,14 @@ void setup() {
     printBanner(profile);
     esp32esso::profile::initActiveProfilePeripherals();
     g_tempLoop.begin(profile);
+    esp32esso::ble::tier1Service().begin(&g_tempLoop, &profile);
 }
 
 void loop() {
     const uint32_t now = millis();
     handleSerial(now);
     g_tempLoop.tick(now);
+    esp32esso::ble::tier1Service().tick(now);
 
     const uint32_t period =
         g_tempLoop.tuningActive() ? kTelemetryPeriodTuningMs : kTelemetryPeriodIdleMs;
