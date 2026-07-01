@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "board/board_config.h"
 #include "control/temperature_loop.h"
 #include "profile/machine_profile.h"
 
@@ -21,9 +22,15 @@ esp32esso::control::TemperatureLoop g_tempLoop;
 uint32_t g_lastTelemetryMs = 0;
 
 void printBanner(const esp32esso::profile::MachineProfile& profile) {
+    const auto& board = esp32esso::board::activeBoard();
     Serial.println();
     Serial.println(F("esp32esso starting"));
     Serial.printf("build: %s %s\n", __DATE__, __TIME__);
+    Serial.printf("board: %s (%s)%s\n",
+                  board.info.id,
+                  board.info.chip,
+                  board.info.recommendedForHigherTiers ? ""
+                                                       : " [Tier 1 target]");
     Serial.printf("profile: %s %s (%s)\n",
                   profile.metadata.brand,
                   profile.metadata.model,

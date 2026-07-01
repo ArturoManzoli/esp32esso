@@ -1,5 +1,6 @@
 #if defined(ESP32ESSO_PROFILE_OSTER_XPERT)
 
+#include "board/board_config.h"
 #include "hal/gpio_discrete_output.h"
 #include "hal/max31855_sensor.h"
 #include "profile/machine_profile.h"
@@ -8,31 +9,16 @@ namespace esp32esso::profile {
 
 namespace {
 
-// =====================================================================
-// Pin assignment (ESP32-S3-DevKitC-1)
-// =====================================================================
-//
-// MAX31855 thermocouple amplifier (SPI, read-only, no MOSI):
-//   CS   -> GPIO 10
-//   SCK  -> GPIO 12
-//   MISO -> GPIO 13
-//
-// Heater SSR control line (active-high opto input):
-//   GPIO 4
-//
-// All other peripherals (solenoid, brew switch, pressure transducer,
-// pump dimmer, load cell) are left unconnected at Tier 1 and added in
-// Tier 2+ commits.
+// Pins come from the active board (see src/board/). The Oster profile is
+// board-agnostic: the same thermal/hydraulic config binds to whichever GPIO
+// map the selected env compiled in. Tier 2+ peripherals (solenoid, brew
+// switch, pressure transducer) are left unconnected here.
+const board::BoardPins& kPins = board::activeBoard().pins;
 
-constexpr uint8_t kPinThermocoupleCs = 10;
-constexpr uint8_t kPinThermocoupleSck = 12;
-constexpr uint8_t kPinThermocoupleMiso = 13;
-constexpr uint8_t kPinHeaterSsr = 4;
-
-hal::Max31855Sensor g_brewTempSensor(kPinThermocoupleCs,
-                                     kPinThermocoupleSck,
-                                     kPinThermocoupleMiso);
-hal::GpioDiscreteOutput g_heaterRelay(kPinHeaterSsr, /*activeHigh=*/true);
+hal::Max31855Sensor g_brewTempSensor(kPins.thermocoupleCs,
+                                     kPins.thermocoupleSck,
+                                     kPins.thermocoupleMiso);
+hal::GpioDiscreteOutput g_heaterRelay(kPins.heaterSsr, /*activeHigh=*/true);
 
 const MachineProfile kOsterXpertProfile = {
     .metadata =
