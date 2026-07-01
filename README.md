@@ -118,8 +118,9 @@ pio run -e esp32-oster-xpert -t upload      # classic ESP32-WROOM
 pio device monitor
 ```
 
-The companion Android app source lives under [`app-android/`](app-android/)
-and is added in Stage 2.
+The Tier 1 Android companion app lives under [`app-android/`](app-android/).
+Build and install it from Android Studio (see [`app-android/README.md`](app-android/README.md)),
+then connect over BLE to set the brew temperature and watch live heater state.
 
 ## Contributing
 
