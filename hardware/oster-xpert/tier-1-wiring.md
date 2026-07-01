@@ -20,11 +20,14 @@ Mains L ----+------------ stock brew thermostat (snap-disc) -----+
             |                  +---------+--------+
             |                            |
             |                            v
-            +------ ESP32-S3 power tap   heater coil
+            +------ ESP32 power tap      heater coil
                        (via 5 V buck)        |
                                              |
 Mains N --------------------------------- heater N
 ```
+
+This wiring is the same on a classic ESP32-WROOM and an ESP32-S3; only the
+GPIO numbers differ (see the pin table in step 4/7 below).
 
 The stock thermostat stays in the circuit as a hard thermal cut: even if
 the SSR fails closed (a common failure mode for counterfeit SSRs), the
@@ -41,29 +44,40 @@ thermostat still opens at its rated trip temperature.
    - the heater leads
 3. Disconnect the wire that runs from the brew thermostat to the heater
    (the **load** side of the brew thermostat).
+   The GPIO numbers depend on your board (the firmware compiles the matching
+   map from `firmware/src/board/`):
+
+   | Signal | ESP32-WROOM (`esp32-oster-xpert`) | ESP32-S3 (`esp32-s3-oster-xpert`) |
+   | ------ | --------------------------------- | --------------------------------- |
+   | Heater SSR | GPIO 4 | GPIO 4 |
+   | MAX31855 `CS` | GPIO 21 | GPIO 10 |
+   | MAX31855 `SCK` | GPIO 18 | GPIO 12 |
+   | MAX31855 `MISO` | GPIO 19 | GPIO 13 |
+
 4. Wire the SSR in series:
    - SSR `1` (AC `+`) -> the brew thermostat load wire
    - SSR `2` (AC `-`) -> the heater terminal
-   - SSR `3` (DC `+`) -> ESP32-S3 GPIO 4 via a 220 ohm resistor
-   - SSR `4` (DC `-`) -> ESP32-S3 GND
+   - SSR `3` (DC `+`) -> ESP32 **heater SSR** GPIO via a 220 ohm resistor
+   - SSR `4` (DC `-`) -> ESP32 GND
 5. Mount the SSR to its heatsink with the supplied thermal pad. Bolt the
    heatsink to a piece of empty case metal that is not part of the brew
    group (avoid heat-soak from the boiler).
 6. Mount the thermocouple to the thermoblock with the stainless hose
    clamp. The bead should sit against the side of the thermoblock under
    the clamp, with the wires routed away from the heater leads.
-7. Wire the MAX31855:
-   - `VCC` -> ESP32-S3 `3V3`
-   - `GND` -> ESP32-S3 `GND`
-   - `CS`  -> ESP32-S3 `GPIO 10`
-   - `SCK` -> ESP32-S3 `GPIO 12`
-   - `MISO` -> ESP32-S3 `GPIO 13`
+7. Wire the MAX31855 (use the `CS`/`SCK`/`MISO` GPIOs for your board from
+   the table above):
+   - `VCC` -> ESP32 `3V3`
+   - `GND` -> ESP32 `GND`
+   - `CS`  -> ESP32 `CS` GPIO
+   - `SCK` -> ESP32 `SCK` GPIO
+   - `MISO` -> ESP32 `MISO` GPIO
 8. Wire the 5 V buck input across the mains side **after** the machine's
    main power switch (so the controller turns off when the machine is
    switched off).
 9. Buck output:
-   - `5V` -> ESP32-S3 `5V` (or `VIN` depending on board variant)
-   - `GND` -> ESP32-S3 `GND`
+   - `5V` -> ESP32 `5V` (or `VIN` depending on board variant)
+   - `GND` -> ESP32 `GND`
 10. Triple-check the wiring against the diagram above.
 11. Reassemble enough to power on safely. Plug in, switch on, and verify
     Serial telemetry shows the banner + a sane temperature within a few

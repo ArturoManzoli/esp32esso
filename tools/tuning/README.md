@@ -7,8 +7,9 @@ open-loop tuning mode (the `s` serial command) shipped in
 
 ## Workflow
 
-1. Flash the firmware with the matching machine-profile env, for example
-   `pio run -e esp32-s3-oster-xpert -t upload`.
+1. Flash the firmware with the env that matches your board and machine, e.g.
+   `pio run -e esp32-oster-xpert -t upload` on a classic ESP32-WROOM or
+   `pio run -e esp32-s3-oster-xpert -t upload` on an ESP32-S3.
 2. With the machine cold and the watcher on the bench, run `capture.py`.
    It opens the serial port, sends the `s` command to start the bench,
    records every JSON telemetry line to CSV, and exits cleanly when the

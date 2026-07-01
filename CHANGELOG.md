@@ -15,8 +15,13 @@ once it reaches 1.0.
   combined security/safety policy.
 - Repository tooling: `.gitignore`, `.editorconfig`, `.clang-format`.
 - GitHub issue and PR templates plus the PlatformIO firmware CI workflow.
-- PlatformIO ESP32-S3 firmware skeleton with a HAL interface and a
+- PlatformIO ESP32 firmware skeleton with a HAL interface and a
   machine-profile config struct.
 - Tier 1 closed-loop PID temperature control with SSR output, a MAX31855
   thermocouple driver, and serial telemetry.
 - First machine profile: Oster Xpert (initial reverse-engineering notes).
+- Board abstraction layer so the same firmware builds for classic ESP32
+  (WROOM) and ESP32-S3, with per-board GPIO maps. Classic ESP32 is the
+  primary Tier 1 target; ESP32-S3 is recommended for Tier 2-4. Adds the
+  `esp32-dev` and `esp32-oster-xpert` PlatformIO envs (`esp32-dev` is now
+  the default).

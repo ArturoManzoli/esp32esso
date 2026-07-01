@@ -23,8 +23,8 @@ and to license your contributions under the project's
 ```bash
 git clone https://github.com/<your-fork>/esp32esso.git
 cd esp32esso/firmware
-pio run                 # build the default env
-pio run -t upload       # flash a connected ESP32-S3
+pio run                 # build the default env (esp32-dev, classic ESP32)
+pio run -t upload       # flash a connected ESP32
 pio device monitor      # serial telemetry
 ```
 

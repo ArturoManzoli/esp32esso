@@ -59,12 +59,18 @@ this platform.
 3. Wire a 25 A opto-isolated SSR in series with the brew thermostat's
    load side (the stock thermostat stays in place as a thermal-fuse-style
    backup; the SSR can only cut, never boost).
-4. Drive the SSR opto input from ESP32-S3 GPIO 4 through a 220 ohm
-   current-limiting resistor.
-5. Connect the MAX31855 amplifier to the ESP32-S3 (`CS=10`, `SCK=12`,
-   `MISO=13`, `VCC=3V3`, `GND=GND`).
-6. Power the ESP32-S3 from a small 5 V buck behind the IEC inlet's switch
+4. Drive the SSR opto input from the ESP32's heater-SSR GPIO (GPIO 4 on
+   both the WROOM and S3 maps) through a 220 ohm current-limiting resistor.
+5. Connect the MAX31855 amplifier to the ESP32 (`VCC=3V3`, `GND=GND`, and
+   `CS`/`SCK`/`MISO` per your board: WROOM `CS=21`, `SCK=18`, `MISO=19`;
+   S3 `CS=10`, `SCK=12`, `MISO=13`).
+6. Power the ESP32 from a small 5 V buck behind the IEC inlet's switch
    (so the controller turns off with the machine).
+
+This project works on any ESP32; a classic ESP32-WROOM is the primary Tier 1
+target, and an ESP32-S3 is recommended if you plan to grow into Tier 2-4.
+See the pin table in
+[`hardware/oster-xpert/tier-1-wiring.md`](../../hardware/oster-xpert/tier-1-wiring.md).
 
 Wiring diagram lives at `hardware/oster-xpert/tier-1-wiring.md`.
 
@@ -103,7 +109,7 @@ the host requirements once: `pip install -r tools/requirements.txt`.
 
 1. Start the machine cold (let it sit unpowered for at least 30 minutes
    after any prior shot so the thermoblock is at room temperature).
-2. Connect USB-serial to the ESP32-S3 and confirm the firmware banner +
+2. Connect USB-serial to the ESP32 and confirm the firmware banner +
    one steady telemetry line in a serial monitor. Close the monitor.
 3. From the repo root, launch the capture script with the run timestamped
    under the gitignored data folder:
