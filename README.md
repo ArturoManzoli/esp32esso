@@ -14,8 +14,8 @@ deliberate differences:
    the Tier 2-4 roadmap (see [Supported boards](#supported-boards)).
 2. A **machine-abstraction layer** (HAL + per-machine profile) lets the same
    firmware target many pump machines instead of just the Gaggia Classic
-   family. The first profile is the **Oster Xpert** (a rebrand of a Chinese
-   pump-espresso platform).
+   family. The first profile is the **Oster Xpert** (a rebrand of the Chinese
+   Sunbeam Barista Max pump-espresso platform).
 
 See [`CREDITS.md`](CREDITS.md) for full attribution.
 
