@@ -9,6 +9,10 @@ once it reaches 1.0.
 
 ### Added
 
+- Tier 1 BLE GATT contract (`protocol/ble/tier1.md`) and firmware service with
+  live MachineState notifications and setpoint write (NVS-persisted).
+- Minimal Tier 1 Android app (`app-android/`): scan/connect, live temp and
+  heater state, setpoint slider.
 - GPL-3.0 license and Gaggiuino attribution in `CREDITS.md`.
 - Project README with hero pitch, tiered install table, and safety warning.
 - Contributing guide, code of conduct (Contributor Covenant 2.1), and

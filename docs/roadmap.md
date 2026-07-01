@@ -17,6 +17,8 @@ Stages are not strict gates - a contributor can do Stage 3 work in parallel
 - first concrete machine profile: Oster Xpert (DONE)
 - step-response data + PID tuning on real hardware (in progress on bench)
 - Tier 1 install guide and BOM (`hardware/oster-xpert/`)
+- Tier 1 BLE GATT contract + firmware service + minimal Android app for live
+  temp, heater state, and setpoint (DONE — remainder of Stage 2 below)
 
 ## Stage 2 - BLE + Android app MVP + Tier 2
 
@@ -29,11 +31,12 @@ Stages are not strict gates - a contributor can do Stage 3 work in parallel
 **Goal**: monitor the machine and set the brew temperature from a phone,
 without WiFi.
 
-- define the BLE GATT contract in `protocol/` (one source of truth)
-- firmware: BLE peripheral service on core 1, telemetry + setpoint write
+- define the BLE GATT contract in `protocol/` (one source of truth) (DONE for Tier 1)
+- firmware: BLE peripheral service, telemetry + setpoint write (DONE for Tier 1)
+- Android app (Kotlin / Jetpack Compose): Tier 1 connect, live temp/heater,
+  setpoint slider (DONE)
 - firmware: pressure-transducer driver + auto shot timer (brew-switch sense)
-- Android app (Kotlin / Jetpack Compose): scan, connect, live charts,
-  set target temp, start/stop
+- Android app: live charts, richer Tier 2 telemetry
 - second machine profile to validate the abstraction layer
 
 ## Stage 3 - Pressure / flow profiling + Tier 3
