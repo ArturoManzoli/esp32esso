@@ -30,7 +30,7 @@ directly.
 
 | Area | Gaggiuino | Esp32esso |
 | ---- | --------- | -------- |
-| Control MCU | STM32F411 / STM32U585 + ESP32-S3 for UI | Single ESP32-S3 |
+| Control MCU | STM32F411 / STM32U585 + ESP32-S3 for UI | Single ESP32 (classic ESP32 for Tier 1; ESP32-S3 recommended for Tier 2-4) |
 | Target machines | Gaggia Classic family (+ Rancilio Silvia) | Any pump espresso machine, via a machine-profile abstraction; first target is the Oster Xpert |
 | UI strategy | Embedded screen + web | Optional embedded screen + native Android app over BLE |
 | License | CC BY-NC 4.0 | GPL-3.0-or-later |

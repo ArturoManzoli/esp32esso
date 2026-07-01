@@ -1,6 +1,6 @@
 # Esp32esso
 
-> An ESP32-S3 brain for "most" pump espresso machines, with a tiered hardware
+> An ESP32 brain for "most" pump espresso machines, with a tiered hardware
 > install path and an optional native Android app that replaces the
 > on-machine screen.
 
@@ -8,8 +8,10 @@ Esp32esso ("ESP32 espresso") is heavily inspired by
 [Gaggiuino](https://gaggiuino.github.io/) but built from scratch with two
 deliberate differences:
 
-1. A single **ESP32-S3** runs both the real-time control loop and the
-   BLE/UI side. No dedicated STM32 companion MCU.
+1. A single **ESP32** runs both the real-time control loop and the BLE/UI
+   side. No dedicated STM32 companion MCU. A cheap classic **ESP32-WROOM**
+   is enough for Tier 1; an **ESP32-S3** is recommended once you move up to
+   the Tier 2-4 roadmap (see [Supported boards](#supported-boards)).
 2. A **machine-abstraction layer** (HAL + per-machine profile) lets the same
    firmware target many pump machines instead of just the Gaggia Classic
    family. The first profile is the **Oster Xpert** (a rebrand of a Chinese
@@ -57,6 +59,23 @@ safest mod; each subsequent tier adds features and electrical complexity.
 A per-tier bill of materials lives under [`hardware/`](hardware/) and grows
 alongside each stage of development.
 
+## Supported boards
+
+Tier 1 runs on **any ESP32 dev board**. The classic **ESP32-WROOM** is the
+primary target while the project is young: it is the cheapest way in and the
+one we are validating the whole experience on first. An **ESP32-S3** is
+recommended once you move up to Tier 2-4, where the extra flash, PSRAM, and
+CPU headroom matter for BLE, live profiling, and OTA.
+
+| Board | Flash / PSRAM | Tier 1 | Tier 2-4 | Notes |
+| ----- | ------------- | ------ | -------- | ----- |
+| **ESP32-WROOM** (DevKit, NodeMCU-32S, ...) | ≥ 4 MB / none | Supported (primary target) | Should work; being validated | Cheapest entry. Uses its own safe GPIO map. |
+| **ESP32-S3** (DevKitC-1, N16R8, ...) | ≥ 8 MB / 2-8 MB | Supported | Recommended | Headroom for the full roadmap. |
+
+Pick the board first, then flash the matching env (`esp32-*` for classic
+ESP32, `esp32-s3-*` for the S3). Flashing S3 firmware onto a classic ESP32
+(or vice versa) fails at upload with a clear chip-mismatch error.
+
 ## Project status
 
 | Stage | Theme | Status |
@@ -71,7 +90,7 @@ The detailed roadmap lives in [`docs/roadmap.md`](docs/roadmap.md).
 ## Repository layout
 
 ```
-firmware/      PlatformIO ESP32-S3 project (real-time control + BLE)
+firmware/      PlatformIO ESP32 project (real-time control + BLE)
 app-android/   Kotlin / Jetpack Compose companion app (Stage 2+)
 protocol/      Single source of truth for the BLE GATT contract
 hardware/      KiCad schematics, wiring diagrams, per-tier BOM
@@ -84,14 +103,18 @@ docs/          Long-form docs, install guides, machine profiles
 Prerequisites:
 
 - [PlatformIO Core](https://platformio.org/install/cli) (`pio --version`)
-- A USB cable and an ESP32-S3 dev board (Tier 1 only requires the bare board
-  + a `MAX31855` thermocouple amplifier + an SSR-capable GPIO)
+- A USB cable and an ESP32 dev board (Tier 1 only requires the bare board
+  + a `MAX31855` thermocouple amplifier + an SSR-capable GPIO). A classic
+  ESP32-WROOM is the primary target; an ESP32-S3 also works.
 
-Build and flash the firmware in its default Oster Xpert profile:
+Build and flash the firmware for the Oster Xpert profile. Use the env that
+matches your board (`esp32-oster-xpert` for a classic ESP32-WROOM,
+`esp32-s3-oster-xpert` for an ESP32-S3):
 
 ```bash
 cd firmware
-pio run -e esp32-s3-oster-xpert -t upload
+pio run -e esp32-oster-xpert -t upload      # classic ESP32-WROOM
+# pio run -e esp32-s3-oster-xpert -t upload # ESP32-S3
 pio device monitor
 ```
 

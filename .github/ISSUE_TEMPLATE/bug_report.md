@@ -23,7 +23,8 @@ labels: ["bug", "triage"]
 
 - Firmware version / commit SHA:
 - Machine profile:
-- ESP32-S3 board (brand, revision):
+- Board / chip (ESP32-WROOM / ESP32-S3 / other; brand, revision):
+- PlatformIO env used (e.g. `esp32-oster-xpert`, `esp32-s3-oster-xpert`):
 - Tier installed (1 / 2 / 3 / 4):
 - Companion app version (if relevant):
 
