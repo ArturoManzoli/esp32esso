@@ -6,8 +6,8 @@ namespace esp32esso::board {
 
 // Classic ESP32-WROOM DevKit (38-pin). Pins avoid the flash-backed range
 // (GPIO 6-11), the input-only range (GPIO 34-39) and the boot-strapping pins
-// (GPIO 0/2/5/12/15). SCK/MISO follow the VSPI defaults; MAX31855 is
-// read-only so no MOSI is wired.
+// (GPIO 0/2/5/12/15). SCK/SO follow the VSPI defaults; the MAX6675 amp
+// (esp32-oster-xpert) is read-only SPI so no MOSI is wired.
 const BoardConfig& activeBoard() {
     static const BoardConfig kBoard = {
         .info =

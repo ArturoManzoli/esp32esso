@@ -3,7 +3,7 @@
 namespace esp32esso::hal {
 
 // Abstract source of a single brew-side temperature reading in degrees
-// Celsius. Implementations include MAX31855 (thermocouple), MAX31865 (PT100
+// Celsius. Implementations include MAX6675/MAX31855 (thermocouple), MAX31865 (PT100
 // RTD), and a software simulator used in unit tests.
 class TemperatureSensor {
 public:
