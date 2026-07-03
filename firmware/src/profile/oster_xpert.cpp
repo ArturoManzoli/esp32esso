@@ -2,7 +2,11 @@
 
 #include "board/board_config.h"
 #include "hal/gpio_discrete_output.h"
+#if defined(ESP32ESSO_THERMOCOUPLE_MAX6675)
+#include "hal/max6675_sensor.h"
+#else
 #include "hal/max31855_sensor.h"
+#endif
 #include "profile/machine_profile.h"
 
 namespace esp32esso::profile {
@@ -15,9 +19,15 @@ namespace {
 // switch, pressure transducer) are left unconnected here.
 const board::BoardPins& kPins = board::activeBoard().pins;
 
+#if defined(ESP32ESSO_THERMOCOUPLE_MAX6675)
+hal::Max6675Sensor g_brewTempSensor(kPins.thermocoupleCs,
+                                    kPins.thermocoupleSck,
+                                    kPins.thermocoupleMiso);
+#else
 hal::Max31855Sensor g_brewTempSensor(kPins.thermocoupleCs,
                                      kPins.thermocoupleSck,
                                      kPins.thermocoupleMiso);
+#endif
 hal::GpioDiscreteOutput g_heaterRelay(kPins.heaterSsr, /*activeHigh=*/true);
 
 const MachineProfile kOsterXpertProfile = {
