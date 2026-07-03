@@ -7,7 +7,8 @@ for what is known about the machine itself and the tuning procedure.
 ## Tier 1 - Temperature brain
 
 Drives the existing thermoblock with closed-loop PID via an SSR, reading
-the thermoblock temperature with a K-type thermocouple and MAX31855.
+the thermoblock temperature with a K-type thermocouple and a MAX6675 amp
+(WROOM build) or MAX31855 (S3 build).
 
 ### BOM (machine-specific additions)
 
@@ -18,7 +19,7 @@ the thermoblock temperature with a K-type thermocouple and MAX31855.
 | 1 | Spade connector kit (6.3 mm and 4.8 mm female) | Mates the SSR into the stock thermostat-load wiring without cutting it |
 | ~ | 18 AWG silicone wire (red / black) | Heater-side wiring, rated for the ambient temperature inside the machine |
 
-The shared Tier 1 BOM (ESP32 board, MAX31855, SSR, buck, etc.) lives in the
+The shared Tier 1 BOM (ESP32 board, thermocouple amp, SSR, buck, etc.) lives in the
 hardware index at [`../README.md`](../README.md).
 
 ### Wiring
