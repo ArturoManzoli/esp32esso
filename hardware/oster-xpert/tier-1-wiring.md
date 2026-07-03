@@ -50,9 +50,13 @@ thermostat still opens at its rated trip temperature.
    | Signal | ESP32-WROOM (`esp32-oster-xpert`) | ESP32-S3 (`esp32-s3-oster-xpert`) |
    | ------ | --------------------------------- | --------------------------------- |
    | Heater SSR | GPIO 4 | GPIO 4 |
-   | MAX31855 `CS` | GPIO 21 | GPIO 10 |
-   | MAX31855 `SCK` | GPIO 18 | GPIO 12 |
-   | MAX31855 `MISO` | GPIO 19 | GPIO 13 |
+   | Thermocouple amp `CS` | GPIO 21 | GPIO 10 |
+   | Thermocouple amp `SCK` | GPIO 18 | GPIO 12 |
+   | Thermocouple amp `SO` / `MISO` | GPIO 19 | GPIO 13 |
+
+   The WROOM build uses a **MAX6675** module (common on Mercado Livre /
+   AliExpress Arduino breakouts). The S3 build uses **MAX31855**; pin names
+   differ slightly (`SO` vs `MISO`) but the wiring is the same 3-wire SPI.
 
 4. Wire the SSR in series:
    - SSR `1` (AC `+`) -> the brew thermostat load wire
@@ -65,13 +69,15 @@ thermostat still opens at its rated trip temperature.
 6. Mount the thermocouple to the thermoblock with the stainless hose
    clamp. The bead should sit against the side of the thermoblock under
    the clamp, with the wires routed away from the heater leads.
-7. Wire the MAX31855 (use the `CS`/`SCK`/`MISO` GPIOs for your board from
-   the table above):
-   - `VCC` -> ESP32 `3V3`
+7. Wire the thermocouple amplifier (use the `CS`/`SCK`/`SO` GPIOs for your
+   board from the table above):
+   - `VCC` -> ESP32 `3V3` (do **not** use 5 V on 3.3 V-only breakouts)
    - `GND` -> ESP32 `GND`
    - `CS`  -> ESP32 `CS` GPIO
    - `SCK` -> ESP32 `SCK` GPIO
-   - `MISO` -> ESP32 `MISO` GPIO
+   - `SO` (MAX6675) or `MISO` (MAX31855) -> ESP32 data GPIO
+   - K-type thermocouple `+`/`-` -> module screw terminals (polarity matters
+     for sign; swapping only inverts the reading)
 8. Wire the 5 V buck input across the mains side **after** the machine's
    main power switch (so the controller turns off when the machine is
    switched off).

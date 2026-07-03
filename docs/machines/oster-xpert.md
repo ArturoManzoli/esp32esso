@@ -61,9 +61,11 @@ this platform.
    backup; the SSR can only cut, never boost).
 4. Drive the SSR opto input from the ESP32's heater-SSR GPIO (GPIO 4 on
    both the WROOM and S3 maps) through a 220 ohm current-limiting resistor.
-5. Connect the MAX31855 amplifier to the ESP32 (`VCC=3V3`, `GND=GND`, and
-   `CS`/`SCK`/`MISO` per your board: WROOM `CS=21`, `SCK=18`, `MISO=19`;
-   S3 `CS=10`, `SCK=12`, `MISO=13`).
+5. Connect the thermocouple amplifier to the ESP32 (`VCC=3V3`, `GND=GND`,
+   and `CS`/`SCK`/data per your board). **WROOM** (`esp32-oster-xpert`)
+   expects a **MAX6675** module (`CS=21`, `SCK=18`, `SO=19`). **S3**
+   (`esp32-s3-oster-xpert`) uses **MAX31855** (`CS=10`, `SCK=12`,
+   `MISO=13`).
 6. Power the ESP32 from a small 5 V buck behind the IEC inlet's switch
    (so the controller turns off with the machine).
 

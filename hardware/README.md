@@ -18,7 +18,7 @@ These items are common to every Tier 1 install regardless of machine:
 | Qty | Part | Notes |
 | --- | ---- | ----- |
 | 1 | ESP32 dev board | **Pick one.** Classic **ESP32-WROOM** DevKit (≥ 4 MB flash) is the cheapest Tier 1 option and the primary target. An **ESP32-S3-DevKitC-1** (N16R8 / N8R2) is recommended if you plan to grow into Tier 2-4. |
-| 1 | MAX31855 thermocouple amplifier breakout | Adafruit-style or generic; verify the chip is not a counterfeit |
+| 1 | Thermocouple amplifier breakout | **WROOM:** MAX6675 (common Mercado Livre / AliExpress module). **S3:** MAX31855. Both are 3.3 V SPI; verify the chip is not a counterfeit |
 | 1 | K-type thermocouple, mineral-insulated, M5 thread | High-temperature wire; M5 thread mates a stainless hose clamp |
 | 1 | 25 A opto-isolated SSR | Common Fotek SSR-25DA-style; verify with a heat sink or spec for resistive load |
 | 1 | SSR heatsink + thermal pad | Mandatory above ~10 A continuous |
