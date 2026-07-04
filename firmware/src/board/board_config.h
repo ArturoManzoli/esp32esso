@@ -8,13 +8,21 @@ namespace esp32esso::board {
 // numbers differ per dev board (classic ESP32 cannot reuse the S3 pins, since
 // GPIO 6-11 back the module flash and a few pins are boot-strapping).
 //
-// Only Tier 1 lines exist today; solenoid, brew-switch, pressure-transducer
-// and pump-dimmer pins are added here as their tiers land.
+// Tier 1 uses a single thermocouple on the thermoblock. Tier 2 adds a second
+// thermocouple at the portafilter/group (`thermocoupleCs2`, sharing the same
+// SCK/SO bus) and an optional brew-switch sense (`brewSwitch`) for the shot
+// timer. `thermoblockNtc` is an ADC1 channel for machines that keep their
+// stock NTC thermistor on the thermoblock instead of a thermocouple (see
+// ESP32ESSO_THERMOBLOCK_NTC). Solenoid, pressure-transducer and pump-dimmer
+// pins land with their tiers.
 struct BoardPins {
     uint8_t thermocoupleCs;
     uint8_t thermocoupleSck;
     uint8_t thermocoupleMiso;
+    uint8_t thermocoupleCs2;  // Tier 2 group/portafilter sensor (shared bus)
+    uint8_t thermoblockNtc;   // ADC1 pin for the stock NTC thermistor option
     uint8_t heaterSsr;
+    uint8_t brewSwitch;  // Tier 2 shot-timer sense; active-low with pullup
 };
 
 // Human-readable board identity plus the capability hints the higher tiers
