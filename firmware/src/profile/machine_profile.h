@@ -4,6 +4,7 @@
 
 #include "hal/discrete_input.h"
 #include "hal/discrete_output.h"
+#include "hal/ntc_thermistor_sensor.h"
 #include "hal/pressure_sensor.h"
 #include "hal/temperature_sensor.h"
 
@@ -29,6 +30,14 @@ struct ThermalConfig {
     float pidKi;
     float pidKd;
     uint32_t pwmWindowMs;     // slow-PWM window for the SSR heater driver
+
+    // Tier 2 cascade: the user setpoint targets the group/portafilter sensor,
+    // and the thermoblock is driven hotter to overcome the transport loss.
+    // thermoblockSetpoint = groupSetpoint + gain * (groupSetpoint - groupTemp),
+    // clamped to [groupSetpoint, groupSetpoint + maxCascadeOffsetC] and the
+    // hard safety cap. `defaultCascadeGain` seeds the phone knob (0..10).
+    float defaultCascadeGain;
+    float maxCascadeOffsetC;
 };
 
 // Wet-side properties. Mostly informational for the user, but a few fields
@@ -48,11 +57,18 @@ struct MachineProfile {
     ThermalConfig thermal;
     HydraulicConfig hydraulic;
 
-    // Tier 1 - always required
+    // Tier 1 - always required. brewTempSensor sits on the thermoblock and is
+    // the inner PID's process variable and the safety cut's reference.
     hal::TemperatureSensor* brewTempSensor;
     hal::DiscreteOutput* heaterRelay;
 
-    // Tier 1 (most machines) - 3-way solenoid + brew switch
+    // Tier 2 - group/portafilter sensor that the cascade setpoint targets.
+    // nullptr on a Tier 1 install: the loop then controls the thermoblock
+    // directly against the user setpoint.
+    hal::TemperatureSensor* groupTempSensor;
+
+    // Tier 1 (most machines) - 3-way solenoid + brew switch. brewSwitch, when
+    // present, auto-starts the Tier 2 shot timer.
     hal::DiscreteOutput* solenoidValve;
     hal::DiscreteInput* brewSwitch;
 
@@ -69,5 +85,10 @@ extern const MachineProfile& activeProfile();
 // profile (SPI bus, pinMode, etc.). Called from setup() exactly once,
 // after Serial.begin().
 extern void initActiveProfilePeripherals();
+
+// Returns the thermoblock NTC when the active profile reads its thermoblock
+// from a stock NTC thermistor (ESP32ESSO_THERMOBLOCK_NTC); nullptr otherwise.
+// Used by the calibration workflow to push and persist fitted R0/Beta.
+extern hal::NtcThermistorSensor* thermoblockNtcSensor();
 
 }  // namespace esp32esso::profile

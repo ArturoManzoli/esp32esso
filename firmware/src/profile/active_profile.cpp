@@ -26,6 +26,8 @@ const MachineProfile kStubProfile = {
             .pidKi = 0.0f,
             .pidKd = 0.0f,
             .pwmWindowMs = 1000,
+            .defaultCascadeGain = 0.0f,
+            .maxCascadeOffsetC = 30.0f,
         },
     .hydraulic =
         {
@@ -36,6 +38,7 @@ const MachineProfile kStubProfile = {
         },
     .brewTempSensor = nullptr,
     .heaterRelay = nullptr,
+    .groupTempSensor = nullptr,
     .solenoidValve = nullptr,
     .brewSwitch = nullptr,
     .pressureSensor = nullptr,
@@ -48,6 +51,10 @@ const MachineProfile& activeProfile() {
 
 void initActiveProfilePeripherals() {
     // Stub profile has no peripherals; intentionally empty.
+}
+
+hal::NtcThermistorSensor* thermoblockNtcSensor() {
+    return nullptr;
 }
 
 #endif  // ESP32ESSO_PROFILE_STUB
