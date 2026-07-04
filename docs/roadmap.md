@@ -31,12 +31,17 @@ Stages are not strict gates - a contributor can do Stage 3 work in parallel
 **Goal**: monitor the machine and set the brew temperature from a phone,
 without WiFi.
 
-- define the BLE GATT contract in `protocol/` (one source of truth) (DONE for Tier 1)
-- firmware: BLE peripheral service, telemetry + setpoint write (DONE for Tier 1)
+- define the BLE GATT contract in `protocol/` (one source of truth) (DONE;
+  Tier 2 revision in `protocol/ble/tier2.md`)
+- firmware: BLE peripheral service, telemetry + setpoint write (DONE)
 - Android app (Kotlin / Jetpack Compose): Tier 1 connect, live temp/heater,
   setpoint slider (DONE)
-- firmware: pressure-transducer driver + auto shot timer (brew-switch sense)
-- Android app: live charts, richer Tier 2 telemetry
+- Tier 2 dual-sensor cascade: a second thermocouple at the portafilter, with
+  the user setpoint targeting the cup and the thermoblock driven hotter to
+  overcome the transport loss; phone-tunable gain (DONE)
+- firmware: auto shot timer (brew-switch sense) plus manual start/stop (DONE)
+- Android app: live brew graph, dual-temp + gain + settings, dark theme (DONE)
+- firmware: pressure-transducer driver (moved to Tier 3 with the pump work)
 - second machine profile to validate the abstraction layer
 
 ## Stage 3 - Pressure / flow profiling + Tier 3
