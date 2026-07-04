@@ -11,6 +11,8 @@ auto shot timer:
 - **Pressure (optional):** a ratiometric transducer on the brew line, scaled
   into an ADC pin. The firmware carries the field as a stub until the Tier 3
   driver lands, but you can wire the sensor now.
+- **Relief valve (optional):** a solenoid on a second SSR that the firmware
+  pulses open for 1 s at the end of a shot to dump brew-line pressure.
 
 The heater/SSR from Tier 1 is unchanged. Sensor **calibration** (fixed-point and
 common-heater methods, with results) lives in its own doc:
@@ -51,6 +53,7 @@ your setpoint. See the cascade math in
 | Group amp `CS2` (dual-TC only) | GPIO 22 | GPIO 11 |
 | Heater SSR | GPIO 4 | GPIO 4 |
 | Brew switch (optional) | GPIO 27 | GPIO 5 |
+| Relief-valve SSR (optional) | GPIO 26 | GPIO 14 |
 | Pressure divider node (ADC, optional) | GPIO 35 (ADC1_CH7, input-only) | GPIO 8 (ADC1_CH7) |
 
 Use **ADC1** channels only for the analog sensors — ADC2 is unavailable while
@@ -199,6 +202,59 @@ don't wire it, use the **Start shot** button in the app instead.
 2. Wire one side to the brew-switch GPIO above and the other to ESP32 `GND`.
    The input uses the internal pull-up and reads active-low (closed = brewing),
    debounced in firmware.
+
+## Pressure-relief valve (optional, dumps pressure after a shot)
+
+Machines without a stock 3-way valve (the Oster Xpert is one — `hasThreeWayValve`
+is `false`) trap brew pressure in the puck when the shot ends, giving a wet puck
+and drips. A solenoid relief valve teed into the brew line fixes this: the
+firmware **pulses it open for 1 second when a shot ends** (`kReliefPulseMs` in
+`firmware/src/control/temperature_loop.cpp`) to dump residual pressure, then
+closes it. The valve is closed at all other times, and a new shot starting
+cancels any in-flight pulse.
+
+The valve is driven from a **second SSR** on its own GPIO, wired exactly like the
+heater SSR — same brick, same drive caveats (see
+[Tier 1](tier-1-wiring.md); a `3–32 VDC` input SSR is marginal at 3.3 V, so use a
+5 V transistor stage if it does not switch reliably).
+
+| Signal | ESP32-WROOM (`esp32-oster-xpert`) | ESP32-S3 (`esp32-s3-oster-xpert`) |
+| ------ | --------------------------------- | --------------------------------- |
+| Relief-valve SSR (DC control) | GPIO **26** | GPIO **14** |
+
+```text
+Mains L ──[ 2nd SSR (load) ]── solenoid valve ── Mains N
+
+SSR DC + ── ESP32 GPIO 26 / GPIO 14   (5 V transistor stage if 3.3 V is marginal)
+SSR DC - ── ESP32 GND
+```
+
+1. Fit a **normally-closed mains solenoid valve** teed into the brew line (a
+   brass T on the pump outlet / group inlet), with its outlet routed to the
+   **drip tray**. Energising the valve opens the path and relieves pressure.
+2. Switch the valve's mains leg through the **second SSR**, mounted on a
+   heatsink like the heater SSR. Keep it on the low/return side you can reach
+   safely and torque all fittings — the line sees 9–12 bar.
+3. Drive the SSR's DC input from the relief-valve GPIO above. The output is
+   active-high; the firmware forces it closed at boot and whenever no valve is
+   bound.
+
+**Alternatives / equivalents**
+
+- **Low-voltage solenoid (12/24 V DC).** Skip the second SSR and switch a
+  low-side **logic-level MOSFET** (with a flyback diode across the coil) from the
+  same GPIO; power the coil from a 12/24 V rail.
+- **3-way vs 2-way.** A 3-way valve vents the group side directly; a 2-way valve
+  teed to the drip tray works too. Either way the firmware just pulses the one
+  output.
+- **Pulse length.** Adjust `kReliefPulseMs` if 1 s under- or over-vents your
+  line.
+
+> [!WARNING]
+> This is a **second mains-switched load**. All the Tier 1 mains-safety rules
+> apply: opto-isolated SSR only, never tap a GPIO into mains, and verify the
+> valve fails **closed** (de-energised) so a controller reset cannot leave the
+> brew line venting.
 
 ## After first boot
 
