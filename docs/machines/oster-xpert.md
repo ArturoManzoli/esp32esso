@@ -76,6 +76,26 @@ See the pin table in
 
 Wiring diagram lives at `hardware/oster-xpert/tier-1-wiring.md`.
 
+## Tier 2 install plan (group-referenced temperature)
+
+Tier 2 splits sensing into a cascade: the **stock 100 kΩ NTC thermistor** stays
+on the thermoblock (inner/safety loop, via an ADC divider) and a **thermocouple
+moves to the portafilter/group** to measure the water at the puck. The user
+setpoint becomes the **cup** target. Because the water loses heat over the
+~20 cm path from the thermoblock (PTFE tubing + valves), the firmware runs the
+thermoblock hotter by a phone-tunable amount:
+
+`thermoblockSetpoint = groupSetpoint + gain × (groupSetpoint − groupTemp)`,
+
+clamped to a bounded offset and the safety cap. Gain `0` disables compensation.
+An optional brew-switch tap auto-starts the shot timer (a manual button in the
+app works without it). The NTC divider pin map, the group thermocouple wiring,
+the optional pressure-transducer front-end, and the brew-switch tap are in
+[`hardware/oster-xpert/tier-2-wiring.md`](../../hardware/oster-xpert/tier-2-wiring.md);
+reusing and calibrating the stock NTC (fixed-point and common-heater methods) is
+in [`hardware/oster-xpert/tier-2-calibration.md`](../../hardware/oster-xpert/tier-2-calibration.md);
+the BLE fields are in [`protocol/ble/tier2.md`](../../protocol/ble/tier2.md).
+
 ## PID tuning procedure (post-Tier-1 install)
 
 The defaults in `firmware/src/profile/oster_xpert.cpp` (`Kp=0.10`,
