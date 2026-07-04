@@ -1,14 +1,14 @@
-# Esp32esso Tier 1 Android app
+# Esp32esso Android app
 
-Minimal companion app for Tier 1 installs: connect over BLE, watch live brew
-temperature and heater state, and set the PID setpoint.
+Companion app for the ESP32 espresso controller. Connects over BLE to watch
+live telemetry, tune the brew, time shots, and edit machine settings — no WiFi.
 
-The GATT contract lives in [`../protocol/ble/tier1.md`](../protocol/ble/tier1.md).
+The GATT contract lives in [`../protocol/ble/tier2.md`](../protocol/ble/tier2.md).
 
 ## Requirements
 
 - Android 8.0+ (API 26) phone or tablet with BLE
-- An Esp32esso board flashed with a Tier 1 BLE env (`esp32-oster-xpert` or
+- An Esp32esso board flashed with a Tier 1/2 BLE env (`esp32-oster-xpert` or
   `esp32-s3-oster-xpert`)
 
 ## Build
@@ -32,14 +32,23 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 1. Power the machine (or the bare dev board) and confirm the firmware advertises
    as **Esp32esso**.
 2. Grant Bluetooth permissions when prompted.
-3. Tap **Connect** — the app scans for the Tier 1 service UUID and connects.
-4. Watch live temperature and heater state; drag the slider and tap **Apply
-   setpoint** to change the brew target (persisted on the ESP32 across reboot).
+3. Tap **Connect** — the app scans for the service UUID and connects.
+4. Read the **group** (portafilter) and **thermoblock** temperatures, set the
+   **brew target** (the cup temperature), and trim the **cascade gain**.
+5. Start/stop a shot from the app (or wire a brew switch), and watch the live
+   **brew graph**.
+6. Open **Settings** (gear icon) to edit the PID gains and steam target; changes
+   persist on the ESP32.
 
-## Scope (Tier 1 MVP)
+## Scope (Tier 2)
 
-- Scan / connect / disconnect
-- Live `MachineState` notifications (temp, setpoint, heater, fault)
-- Setpoint write
+- Dual-sensor readout: group/portafilter target + thermoblock, with the derived
+  thermoblock setpoint and heater duty
+- Cascade-gain slider (0–10, 0.1 steps) and brew-target slider (80–110 °C)
+- Shot timer: manual start/stop plus auto from a wired brew switch
+- Live brew graph (thermoblock / group / target), with pressure, flow, and
+  weight lanes reserved for Tier 3/4 hardware
+- Machine settings: inner PID gains and steam target
 
-Pressure curves, shot profiles, and OTA arrive in later stages.
+Dark theme with an orange accent and frosted-glass surfaces. Pressure/flow
+profiling and OTA arrive in later stages.

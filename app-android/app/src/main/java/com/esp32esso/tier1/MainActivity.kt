@@ -8,12 +8,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.esp32esso.tier1.ui.Esp32essoTheme
 import com.esp32esso.tier1.ui.MainScreen
+import com.esp32esso.tier1.ui.SettingsScreen
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -29,14 +31,25 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface {
-                    val uiState by viewModel.uiState.collectAsState()
+            Esp32essoTheme {
+                val uiState by viewModel.uiState.collectAsState()
+                var showSettings by remember { mutableStateOf(false) }
+
+                if (showSettings) {
+                    SettingsScreen(
+                        settings = uiState.settings,
+                        onApply = viewModel::applySettings,
+                        onBack = { showSettings = false },
+                    )
+                } else {
                     MainScreen(
                         uiState = uiState,
                         onConnect = { requestPermissionsAndConnect() },
                         onDisconnect = viewModel::disconnect,
                         onSetpointChanged = viewModel::applySetpoint,
+                        onGainChanged = viewModel::applyGain,
+                        onBrewToggle = viewModel::setBrewing,
+                        onOpenSettings = { showSettings = true },
                     )
                 }
             }
