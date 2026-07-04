@@ -64,6 +64,8 @@ ThermocoupleSensor g_groupTempSensor(kPins.thermocoupleCs2,
                                      kPins.thermocoupleMiso);
 #endif
 hal::GpioDiscreteInput g_brewSwitch(kPins.brewSwitch, /*activeLow=*/true);
+// Relief/3-way valve driven by a second SSR/MOSFET; pulsed open after a shot.
+hal::GpioDiscreteOutput g_solenoidValve(kPins.solenoidValve, /*activeHigh=*/true);
 #endif
 
 const MachineProfile kOsterXpertProfile = {
@@ -113,7 +115,11 @@ const MachineProfile kOsterXpertProfile = {
 #else
     .groupTempSensor = nullptr,
 #endif
-    .solenoidValve = nullptr,  // Tier 3+
+#if defined(ESP32ESSO_TIER2)
+    .solenoidValve = &g_solenoidValve,
+#else
+    .solenoidValve = nullptr,
+#endif
 #if defined(ESP32ESSO_TIER2)
     .brewSwitch = &g_brewSwitch,
 #else
@@ -142,6 +148,7 @@ void initActiveProfilePeripherals() {
 #if defined(ESP32ESSO_TIER2)
     g_groupTempSensor.begin();
     g_brewSwitch.begin();
+    g_solenoidValve.begin();
 #endif
 }
 

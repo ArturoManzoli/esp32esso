@@ -117,7 +117,8 @@ void emitTelemetry(uint32_t nowMs) {
 
     Serial.printf(
         "{\"t\":%lu,\"tb\":%.2f,\"grp\":%.2f,\"sp\":%.2f,\"tb_sp\":%.2f,\"gain\":%.1f,"
-        "\"out\":%.3f,\"heat\":%d,\"brew\":%d,\"shot_ms\":%lu,\"fault\":\"%s\",\"tune\":%d}\n",
+        "\"out\":%.3f,\"heat\":%d,\"brew\":%d,\"shot_ms\":%lu,\"relief\":%d,"
+        "\"fault\":\"%s\",\"tune\":%d}\n",
         static_cast<unsigned long>(nowMs),
         std::isnan(tb) ? 0.0f : tb,
         std::isnan(grp) ? 0.0f : grp,
@@ -128,6 +129,7 @@ void emitTelemetry(uint32_t nowMs) {
         heat,
         brew,
         static_cast<unsigned long>(g_tempLoop.shotElapsedMs(nowMs)),
+        g_tempLoop.reliefValveOpen() ? 1 : 0,
         fault ? fault : "",
         tune);
 }
