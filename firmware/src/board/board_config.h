@@ -22,7 +22,8 @@ struct BoardPins {
     uint8_t thermocoupleCs2;  // Tier 2 group/portafilter sensor (shared bus)
     uint8_t thermoblockNtc;   // ADC1 pin for the stock NTC thermistor option
     uint8_t heaterSsr;
-    uint8_t brewSwitch;  // Tier 2 shot-timer sense; active-low with pullup
+    uint8_t brewSwitch;    // Tier 2 shot-timer sense; active-low with pullup
+    uint8_t solenoidValve;  // Tier 2 relief/3-way valve output (second SSR/MOSFET)
 };
 
 // Human-readable board identity plus the capability hints the higher tiers

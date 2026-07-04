@@ -69,6 +69,11 @@ public:
     uint8_t brewSource() const { return brewSource_; }
     uint32_t shotElapsedMs(uint32_t nowMs) const;
 
+    // Pressure-relief valve: pulsed open for a fixed window when a shot ends,
+    // to dump residual puck/line pressure. Closed at all other times. Only
+    // driven when the profile binds a solenoidValve output.
+    bool reliefValveOpen() const { return reliefValveOpen_; }
+
     // Clears the latched fault (e.g. after the operator inspects the
     // sensor wiring). Does not modify the setpoint.
     void clearFault();
@@ -122,6 +127,7 @@ private:
     void runCalibrationStep(uint32_t nowMs);
     void updateSlowPwm(uint32_t nowMs);
     void updateBrewState(uint32_t nowMs);
+    void updateReliefValve(uint32_t nowMs);
     float computeThermoblockSetpoint() const;
     void latchFault(const char* reason);
 
@@ -151,6 +157,10 @@ private:
     bool manualBrew_ = false;
     uint8_t brewSource_ = 0;
     uint32_t shotStartMs_ = 0;
+
+    // Pressure-relief valve pulse (see reliefValveOpen())
+    bool reliefValveOpen_ = false;
+    uint32_t reliefOpenedMs_ = 0;
 
     uint32_t lastPidMs_ = 0;
     uint32_t windowStartMs_ = 0;

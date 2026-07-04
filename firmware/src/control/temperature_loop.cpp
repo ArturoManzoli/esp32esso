@@ -7,6 +7,7 @@ namespace esp32esso::control {
 namespace {
 constexpr uint32_t kPidPeriodMs = 200;  // 5 Hz; thermocouple settles slowly
 constexpr float kMaxBrewSetpointC = 110.0f;  // brew target never needs to exceed this
+constexpr uint32_t kReliefPulseMs = 1000;  // hold the relief valve open this long after a shot
 
 // NTC calibration bench tunables. The reference is the thermocouple (group
 // sensor); the NTC is only logged. The bench holds constant duty rungs and
@@ -48,6 +49,8 @@ void TemperatureLoop::begin(const profile::MachineProfile& profile) {
     manualBrew_ = false;
     brewSource_ = 0;
     shotStartMs_ = 0;
+    reliefValveOpen_ = false;
+    reliefOpenedMs_ = 0;
     lastPidMs_ = 0;
     windowStartMs_ = 0;
     windowOnTimeMs_ = 0;
@@ -55,6 +58,9 @@ void TemperatureLoop::begin(const profile::MachineProfile& profile) {
     calSampleLatched_ = false;
     if (profile.heaterRelay) {
         profile.heaterRelay->set(false);
+    }
+    if (profile.solenoidValve) {
+        profile.solenoidValve->set(false);
     }
 }
 
@@ -64,6 +70,7 @@ void TemperatureLoop::tick(uint32_t nowMs) {
         return;
     }
     updateBrewState(nowMs);
+    updateReliefValve(nowMs);
     if (cal_.active) {
         runCalibrationStep(nowMs);
     } else if (tuning_.active) {
@@ -135,10 +142,26 @@ void TemperatureLoop::updateBrewState(uint32_t nowMs) {
         brewing_ = true;
         shotStartMs_ = nowMs;
         brewSource_ = switchActive ? 2 : 1;
+        // A new shot supersedes any in-flight relief pulse.
+        reliefValveOpen_ = false;
     } else if (!active && brewing_) {
         brewing_ = false;
         brewSource_ = 0;
+        // Open the relief valve to dump residual pressure; updateReliefValve
+        // closes it again after kReliefPulseMs.
+        reliefValveOpen_ = true;
+        reliefOpenedMs_ = nowMs;
     }
+}
+
+void TemperatureLoop::updateReliefValve(uint32_t nowMs) {
+    if (profile_ == nullptr || profile_->solenoidValve == nullptr) {
+        return;
+    }
+    if (reliefValveOpen_ && (nowMs - reliefOpenedMs_) >= kReliefPulseMs) {
+        reliefValveOpen_ = false;
+    }
+    profile_->solenoidValve->set(reliefValveOpen_);
 }
 
 float TemperatureLoop::computeThermoblockSetpoint() const {
