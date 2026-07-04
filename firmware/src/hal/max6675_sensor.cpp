@@ -26,16 +26,39 @@ void Max6675Sensor::begin() {
     pinMode(csPin_, OUTPUT);
     digitalWrite(csPin_, HIGH);
     SPI.begin(sckPin_, misoPin_, -1, csPin_);
+    // Discard the first conversions after power-up (datasheet: ~220 ms each).
+    for (int i = 0; i < 2; ++i) {
+        SPI.beginTransaction(SPISettings(kSpiHzMax6675, MSBFIRST, SPI_MODE0));
+        digitalWrite(csPin_, LOW);
+        delayMicroseconds(1);
+        (void)SPI.transfer16(0);
+        digitalWrite(csPin_, HIGH);
+        SPI.endTransaction();
+        delay(220);
+    }
 }
 
 float Max6675Sensor::readCelsius() {
-    SPI.beginTransaction(SPISettings(kSpiHzMax6675, MSBFIRST, SPI_MODE0));
-    digitalWrite(csPin_, LOW);
-    delayMicroseconds(1);
-    const uint16_t frame = SPI.transfer16(0);
-    digitalWrite(csPin_, HIGH);
-    SPI.endTransaction();
+    // Each read completes the previous conversion; discard one frame first.
+    auto readFrame = [this]() -> uint16_t {
+        SPI.beginTransaction(SPISettings(kSpiHzMax6675, MSBFIRST, SPI_MODE0));
+        digitalWrite(csPin_, LOW);
+        delayMicroseconds(1);
+        const uint16_t frame = SPI.transfer16(0);
+        digitalWrite(csPin_, HIGH);
+        SPI.endTransaction();
+        return frame;
+    };
 
+    (void)readFrame();
+    const uint16_t frame = readFrame();
+
+    // A floating MISO line often reads 0x0000, which decodes as 0 C with no
+    // fault bit — treat empty-bus patterns as disconnected.
+    if (frame == 0 || frame == 0xFFFF) {
+        ok_ = false;
+        return NAN;
+    }
     if ((frame & 0x0004) != 0) {
         ok_ = false;
         return NAN;
