@@ -6,6 +6,7 @@ self-contained tool with its own README.
 | Tool | Purpose |
 | ---- | ------- |
 | [`tuning/`](tuning/) | Capture step-response telemetry and derive PID gains from the fitted FOPDT model |
+| [`ntc-cal/`](ntc-cal/) | Calibrate the thermoblock NTC against the thermocouple (fit R0/Beta, persist to NVS, plot before/after) |
 
 ## Installation
 
