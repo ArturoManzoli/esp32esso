@@ -47,7 +47,8 @@ data class BleUiState(
     val machineState: MachineState? = null,
     val settings: MachineSettings? = null,
     val pendingSetpointC: Float? = null,
-    val pendingGain: Float? = null,
+    val pendingThermoblockOffsetC: Float? = null,
+    val preinfusionSec: Float? = null,
     val history: List<GraphSample> = emptyList(),
     val statusMessage: String? = null,
 )
@@ -62,9 +63,13 @@ class Tier1BleClient(context: Context) {
     private var gatt: BluetoothGatt? = null
     private var stateCharacteristic: BluetoothGattCharacteristic? = null
     private var setpointCharacteristic: BluetoothGattCharacteristic? = null
-    private var gainCharacteristic: BluetoothGattCharacteristic? = null
+    private var thermoblockOffsetCharacteristic: BluetoothGattCharacteristic? = null
     private var settingsCharacteristic: BluetoothGattCharacteristic? = null
     private var brewControlCharacteristic: BluetoothGattCharacteristic? = null
+    private var heaterEnableCharacteristic: BluetoothGattCharacteristic? = null
+    private var preinfusionCharacteristic: BluetoothGattCharacteristic? = null
+    private var flushCharacteristic: BluetoothGattCharacteristic? = null
+    private var thermoblockSetpointCharacteristic: BluetoothGattCharacteristic? = null
 
     private val history = ArrayDeque<GraphSample>()
 
@@ -98,6 +103,17 @@ class Tier1BleClient(context: Context) {
                             deviceName = gatt.device.name ?: "Esp32esso",
                             statusMessage = "Discovering services…",
                         )
+                    // Force-invalidate the Android BLE stack's cached service
+                    // list before discovering. The ESP32 gets its GATT table
+                    // rewritten every time we flash new characteristics (Flush,
+                    // Thermoblock Offset, etc.), but Android caches the pre-
+                    // flash service list on the phone side and keeps handing us
+                    // stale characteristic references — which is why writes
+                    // silently target attributes that no longer exist. The
+                    // NimBLE server on the ESP does not issue a Service Changed
+                    // indication after reboot, so we have to prod the stack
+                    // ourselves via the hidden BluetoothGatt.refresh() method.
+                    forceRefreshGattCache(gatt)
                     gatt.discoverServices()
                     return
                 }
@@ -123,9 +139,14 @@ class Tier1BleClient(context: Context) {
                 }
                 stateCharacteristic = service.getCharacteristic(Tier1Gatt.machineStateUuid)
                 setpointCharacteristic = service.getCharacteristic(Tier1Gatt.setpointUuid)
-                gainCharacteristic = service.getCharacteristic(Tier1Gatt.gainUuid)
+                thermoblockOffsetCharacteristic = service.getCharacteristic(Tier1Gatt.thermoblockOffsetUuid)
                 settingsCharacteristic = service.getCharacteristic(Tier1Gatt.settingsUuid)
                 brewControlCharacteristic = service.getCharacteristic(Tier1Gatt.brewControlUuid)
+                heaterEnableCharacteristic = service.getCharacteristic(Tier1Gatt.heaterEnableUuid)
+                preinfusionCharacteristic = service.getCharacteristic(Tier1Gatt.preinfusionUuid)
+                flushCharacteristic = service.getCharacteristic(Tier1Gatt.flushUuid)
+                thermoblockSetpointCharacteristic =
+                    service.getCharacteristic(Tier1Gatt.thermoblockSetpointUuid)
                 if (stateCharacteristic == null || setpointCharacteristic == null) {
                     fail("Missing Tier 2 characteristics")
                     return
@@ -238,13 +259,49 @@ class Tier1BleClient(context: Context) {
         mergeSetpoint(celsius)
     }
 
-    fun writeGain(gain: Float) {
-        val characteristic = gainCharacteristic ?: return
-        _uiState.value = _uiState.value.copy(pendingGain = gain)
-        writeChar(characteristic, gain.toLeFloatBytes())
+    fun writeThermoblockOffset(offsetC: Float) {
+        val characteristic = thermoblockOffsetCharacteristic ?: return
+        _uiState.value = _uiState.value.copy(pendingThermoblockOffsetC = offsetC)
+        writeChar(characteristic, offsetC.toLeFloatBytes())
         val current = _uiState.value.machineState
         if (current != null) {
-            _uiState.value = _uiState.value.copy(machineState = current.copy(gain = gain))
+            // Writing the offset clears any absolute manual override firmware-side,
+            // so optimistically drop the flag too.
+            _uiState.value = _uiState.value.copy(
+                machineState = current.copy(thermoblockOffsetC = offsetC, thermoblockManual = false),
+            )
+        }
+    }
+
+    // Pins the thermoblock at an absolute temperature, overriding group+offset.
+    // Passing 0 clears the override and returns to the relational behaviour.
+    fun writeThermoblockSetpoint(celsius: Float) {
+        val characteristic = thermoblockSetpointCharacteristic ?: return
+        writeChar(characteristic, celsius.toLeFloatBytes())
+        val current = _uiState.value.machineState
+        if (current != null) {
+            val on = celsius > 0f
+            _uiState.value = _uiState.value.copy(
+                machineState = current.copy(
+                    thermoblockManual = on,
+                    thermoblockSetpointC = if (on) celsius else current.thermoblockSetpointC,
+                ),
+            )
+        }
+    }
+
+    fun writeFlush(start: Boolean) {
+        val characteristic = flushCharacteristic
+        if (characteristic == null) {
+            android.util.Log.w("EssoBLE", "writeFlush($start) skipped: characteristic null")
+            return
+        }
+        android.util.Log.w("EssoBLE", "writeFlush($start) -> writing 1 byte")
+        writeChar(characteristic, byteArrayOf(if (start) 1 else 0))
+        val current = _uiState.value.machineState
+        if (current != null) {
+            // Optimistic reflect; the next MachineState notification confirms.
+            _uiState.value = _uiState.value.copy(machineState = current.copy(flushing = start))
         }
     }
 
@@ -257,6 +314,23 @@ class Tier1BleClient(context: Context) {
     fun writeBrew(active: Boolean) {
         val characteristic = brewControlCharacteristic ?: return
         writeChar(characteristic, byteArrayOf(if (active) 1 else 0))
+    }
+
+    fun writePreinfusion(seconds: Float) {
+        val characteristic = preinfusionCharacteristic ?: return
+        _uiState.value = _uiState.value.copy(preinfusionSec = seconds)
+        writeChar(characteristic, seconds.toLeFloatBytes())
+    }
+
+    fun writeHeaterEnabled(enabled: Boolean) {
+        val characteristic = heaterEnableCharacteristic ?: return
+        writeChar(characteristic, byteArrayOf(if (enabled) 1 else 0))
+        // Optimistically reflect the toggle so the switch tracks the tap before
+        // the next MachineState notification confirms it.
+        val current = _uiState.value.machineState
+        if (current != null) {
+            _uiState.value = _uiState.value.copy(machineState = current.copy(heaterEnabled = enabled))
+        }
     }
 
     private fun enableStateNotifications(gatt: BluetoothGatt) {
@@ -291,29 +365,50 @@ class Tier1BleClient(context: Context) {
     }
 
     private fun writeChar(characteristic: BluetoothGattCharacteristic, bytes: ByteArray) {
-        val g = gatt ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            g.writeCharacteristic(characteristic, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
-        } else {
-            characteristic.value = bytes
-            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            @Suppress("DEPRECATION")
-            g.writeCharacteristic(characteristic)
+        val g = gatt
+        if (g == null) {
+            android.util.Log.w("EssoBLE", "writeChar skipped: gatt null")
+            return
         }
+        val ok =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                g.writeCharacteristic(characteristic, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
+                    android.bluetooth.BluetoothStatusCodes.SUCCESS
+            } else {
+                characteristic.value = bytes
+                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                @Suppress("DEPRECATION")
+                g.writeCharacteristic(characteristic)
+            }
+        android.util.Log.w("EssoBLE",
+            "writeChar uuid=${characteristic.uuid} len=${bytes.size} ok=$ok")
     }
 
     private fun handleRead(gatt: BluetoothGatt, uuid: UUID, value: ByteArray) {
         when (uuid) {
             Tier1Gatt.setpointUuid -> {
                 floatOf(value)?.let { mergeSetpoint(it) }
-                gainCharacteristic?.let { gatt.readCharacteristic(it) }
+                thermoblockOffsetCharacteristic?.let { gatt.readCharacteristic(it) }
             }
-            Tier1Gatt.gainUuid -> {
+            Tier1Gatt.thermoblockOffsetUuid -> {
+                floatOf(value)?.let { offset ->
+                    val current = _uiState.value.machineState
+                    _uiState.value = _uiState.value.copy(
+                        machineState = current?.copy(thermoblockOffsetC = offset),
+                        pendingThermoblockOffsetC = null,
+                    )
+                }
                 settingsCharacteristic?.let { gatt.readCharacteristic(it) }
             }
             Tier1Gatt.settingsUuid -> {
                 MachineSettings.fromBytes(value)?.let {
                     _uiState.value = _uiState.value.copy(settings = it)
+                }
+                preinfusionCharacteristic?.let { gatt.readCharacteristic(it) }
+            }
+            Tier1Gatt.preinfusionUuid -> {
+                floatOf(value)?.let {
+                    _uiState.value = _uiState.value.copy(preinfusionSec = it)
                 }
             }
         }
@@ -323,14 +418,34 @@ class Tier1BleClient(context: Context) {
         adapter?.bluetoothLeScanner?.stopScan(scanCallback)
     }
 
+    // Calls the hidden BluetoothGatt.refresh() to drop the on-device GATT
+    // cache before discovery. Not part of the public SDK, but the same trick
+    // every BLE app that talks to reflashable peripherals uses. Failures here
+    // are non-fatal: on a device where reflection is blocked, we simply keep
+    // the (possibly stale) cache and rely on the peripheral not having changed
+    // its attribute table.
+    private fun forceRefreshGattCache(gatt: BluetoothGatt) {
+        try {
+            val method = gatt.javaClass.getMethod("refresh")
+            val ok = method.invoke(gatt) as? Boolean ?: false
+            android.util.Log.w("EssoBLE", "gatt.refresh() -> $ok")
+        } catch (t: Throwable) {
+            android.util.Log.w("EssoBLE", "gatt.refresh() unavailable: ${t.message}")
+        }
+    }
+
     private fun cleanupGatt() {
         gatt?.close()
         gatt = null
         stateCharacteristic = null
         setpointCharacteristic = null
-        gainCharacteristic = null
+        thermoblockOffsetCharacteristic = null
         settingsCharacteristic = null
         brewControlCharacteristic = null
+        heaterEnableCharacteristic = null
+        preinfusionCharacteristic = null
+        flushCharacteristic = null
+        thermoblockSetpointCharacteristic = null
         history.clear()
     }
 
@@ -341,7 +456,7 @@ class Tier1BleClient(context: Context) {
             _uiState.value.copy(
                 machineState = state,
                 pendingSetpointC = null,
-                pendingGain = null,
+                pendingThermoblockOffsetC = null,
                 history = history.toList(),
             )
     }
@@ -352,7 +467,12 @@ class Tier1BleClient(context: Context) {
                 uptimeMs = state.uptimeMs,
                 thermoblockC = state.thermoblockTempC,
                 groupC = state.groupTempC,
-                setpointC = state.groupSetpointC,
+                // Plot the thermoblock setpoint (group + offset), not the group
+                // setpoint on its own — that way the offset slider moves the
+                // target line up/down in the graph, which is what the operator
+                // wants to see when tuning the offset. The group setpoint stays
+                // visible in the temperatures card's "→ NN °C" subtitle.
+                setpointC = state.thermoblockSetpointC,
                 dutyPct = state.heaterDutyPct.toFloat(),
                 pressureBar = state.pressureBar,
                 flowMlS = state.flowMlS,
@@ -386,7 +506,7 @@ class Tier1BleClient(context: Context) {
         private val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         private const val MAX_HISTORY = 900
 
-        // Max ATT MTU; the 48-byte MachineState needs more than the 23-byte
+        // Max ATT MTU; the 52-byte MachineState needs more than the 23-byte
         // default. The peripheral negotiates down to what it supports.
         private const val PREFERRED_MTU = 517
 
