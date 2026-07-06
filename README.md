@@ -1,3 +1,5 @@
+![Esp32esso — ESP32-powered espresso on the bench](docs/images/header.png)
+
 # Esp32esso
 
 > An ESP32 brain for "most" pump espresso machines, with a tiered hardware
