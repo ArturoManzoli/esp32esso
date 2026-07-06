@@ -115,21 +115,27 @@ void emitTelemetry(uint32_t nowMs) {
     }
     Serial.println();
 
+    const float press = g_tempLoop.pressureBar();
     Serial.printf(
-        "{\"t\":%lu,\"tb\":%.2f,\"grp\":%.2f,\"sp\":%.2f,\"tb_sp\":%.2f,\"gain\":%.1f,"
-        "\"out\":%.3f,\"heat\":%d,\"brew\":%d,\"shot_ms\":%lu,\"relief\":%d,"
-        "\"fault\":\"%s\",\"tune\":%d}\n",
+        "{\"t\":%lu,\"tb\":%.2f,\"grp\":%.2f,\"sp\":%.2f,\"tb_sp\":%.2f,\"tb_off\":%.1f,"
+        "\"out\":%.3f,\"heat\":%d,\"heat_en\":%d,\"brew\":%d,\"shot_ms\":%lu,\"relief\":%d,"
+        "\"flush\":%d,\"flush_ms\":%lu,"
+        "\"bar\":%.2f,\"fault\":\"%s\",\"tune\":%d}\n",
         static_cast<unsigned long>(nowMs),
         std::isnan(tb) ? 0.0f : tb,
         std::isnan(grp) ? 0.0f : grp,
         sp,
         tbSp,
-        g_tempLoop.gain(),
+        g_tempLoop.thermoblockOffsetC(),
         out,
         heat,
+        g_tempLoop.heaterEnabled() ? 1 : 0,
         brew,
         static_cast<unsigned long>(g_tempLoop.shotElapsedMs(nowMs)),
         g_tempLoop.reliefValveOpen() ? 1 : 0,
+        g_tempLoop.flushing() ? 1 : 0,
+        static_cast<unsigned long>(g_tempLoop.flushRemainingMs(nowMs)),
+        std::isnan(press) ? 0.0f : press,
         fault ? fault : "",
         tune);
 }
@@ -141,6 +147,7 @@ void printHelp() {
     Serial.println(F("#   help | h | ?              -> this help"));
     Serial.println(F("#   clear | c                 -> clear latched fault"));
     Serial.println(F("#   stop | q                  -> stop calibration/tuning"));
+    Serial.println(F("#   heater on|off             -> master heater enable"));
     Serial.println(F("#   heat <duty%> <s> <abortC> -> open-loop step (alias: s = 50/120/140)"));
     Serial.println(F("#   cal start [endC] [stepC] [maxDuty%] -> NTC soak calibration vs TC"));
     Serial.println(F("#   cal stop                  -> abort calibration"));
@@ -232,6 +239,15 @@ void processLine(char* line, uint32_t nowMs) {
         } else if (g_tempLoop.tuningActive()) {
             g_tempLoop.stopTuning();
             Serial.println(F("# tuning: stopped by operator"));
+        }
+    } else if (!std::strcmp(tok, "heater")) {
+        const char* sub = std::strtok(nullptr, " \t");
+        if (sub && (!std::strcmp(sub, "on") || !std::strcmp(sub, "off"))) {
+            const bool on = !std::strcmp(sub, "on");
+            g_tempLoop.setHeaterEnabled(on);
+            Serial.printf("# heater: %s\n", on ? "enabled" : "disabled");
+        } else {
+            Serial.println(F("# heater: expected 'on' or 'off'"));
         }
     } else if (!std::strcmp(tok, "s")) {
         g_tempLoop.startTuning(nowMs, kBenchDuty, kBenchDurationMs, kBenchAbortTempC);

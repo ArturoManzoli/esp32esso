@@ -8,13 +8,15 @@ namespace esp32esso::board {
 // numbers differ per dev board (classic ESP32 cannot reuse the S3 pins, since
 // GPIO 6-11 back the module flash and a few pins are boot-strapping).
 //
-// Tier 1 uses a single thermocouple on the thermoblock. Tier 2 adds a second
-// thermocouple at the portafilter/group (`thermocoupleCs2`, sharing the same
-// SCK/SO bus) and an optional brew-switch sense (`brewSwitch`) for the shot
-// timer. `thermoblockNtc` is an ADC1 channel for machines that keep their
-// stock NTC thermistor on the thermoblock instead of a thermocouple (see
-// ESP32ESSO_THERMOBLOCK_NTC). Solenoid, pressure-transducer and pump-dimmer
-// pins land with their tiers.
+// Tier 1 uses a single thermocouple on the thermoblock. Tier 2 (recommended)
+// adds a second, identical thermocouple at the portafilter/group
+// (`thermocoupleCs2`, sharing the same SCK/SO bus) plus an optional brew SSR
+// output (`brewSsr`) for pump/valve control from the app. `thermoblockNtc` is
+// an ADC1 channel for the alternative build that reuses a stock NTC thermistor
+// on the thermoblock instead of a thermocouple (see ESP32ESSO_THERMOBLOCK_NTC);
+// the dual-thermocouple setup is preferred (linear, cold-junction-compensated,
+// less drift). Solenoid, pressure-transducer and pump-dimmer pins land with
+// their tiers.
 struct BoardPins {
     uint8_t thermocoupleCs;
     uint8_t thermocoupleSck;
@@ -22,8 +24,9 @@ struct BoardPins {
     uint8_t thermocoupleCs2;  // Tier 2 group/portafilter sensor (shared bus)
     uint8_t thermoblockNtc;   // ADC1 pin for the stock NTC thermistor option
     uint8_t heaterSsr;
-    uint8_t brewSwitch;    // Tier 2 shot-timer sense; active-low with pullup
+    uint8_t brewSsr;  // Tier 2 brew pump/valve SSR (app start/stop shot)
     uint8_t solenoidValve;  // Tier 2 relief/3-way valve output (second SSR/MOSFET)
+    uint8_t pressureAdc;  // Tier 2 brew-line pressure transducer (ADC1 divider node)
 };
 
 // Human-readable board identity plus the capability hints the higher tiers

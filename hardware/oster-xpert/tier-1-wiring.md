@@ -49,7 +49,7 @@ thermostat still opens at its rated trip temperature.
 
    | Signal | ESP32-WROOM (`esp32-oster-xpert`) | ESP32-S3 (`esp32-s3-oster-xpert`) |
    | ------ | --------------------------------- | --------------------------------- |
-   | Heater SSR | GPIO 4 | GPIO 4 |
+   | Heater SSR | GPIO **23** (D23) | GPIO 4 |
    | Thermocouple amp `CS` | GPIO 21 | GPIO 10 |
    | Thermocouple amp `SCK` | GPIO 18 | GPIO 12 |
    | Thermocouple amp `SO` / `MISO` | GPIO 19 | GPIO 13 |

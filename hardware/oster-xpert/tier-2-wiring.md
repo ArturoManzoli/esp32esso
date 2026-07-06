@@ -4,26 +4,31 @@ Tier 2 turns the single-sensor Tier 1 rig into a **two-sensor cascade**, with an
 optional brew-line **pressure transducer** and a **brew-switch tap** for the
 auto shot timer:
 
-- **Thermoblock:** the machine's **stock NTC thermistor** (already bolted to the
-  thermoblock), read through a resistor divider on an ADC pin.
+- **Thermoblock:** **recommended — a second thermocouple identical to the group
+  one** on the thermoblock (same amp + probe as Tier 1). The alternative is the
+  machine's **stock NTC thermistor** read through a resistor divider on an ADC pin
+  (the `-ntc` build). Two thermocouples is the better sensor — see
+  [Thermoblock sensor](#thermoblock-sensor-two-thermocouples-recommended-or-the-stock-ntc).
 - **Group/portafilter:** a **thermocouple** at the water exit over the
   portafilter adapter.
 - **Pressure (optional):** a ratiometric transducer on the brew line, scaled
-  into an ADC pin. The firmware carries the field as a stub until the Tier 3
-  driver lands, but you can wire the sensor now.
+  into an ADC pin. The firmware reads it live (spike/ripple-filtered) and graphs
+  it in the app when the `ESP32ESSO_PRESSURE_ADC` build flag is set.
 - **Relief valve (optional):** a solenoid on a second SSR that the firmware
-  pulses open for 1 s at the end of a shot to dump brew-line pressure.
+  drives 3-way style — held **open (venting to the drip tray) while idle**,
+  **closed the instant a shot starts**, and reopened when it ends.
 
 The heater/SSR from Tier 1 is unchanged. Sensor **calibration** (fixed-point and
 common-heater methods, with results) lives in its own doc:
 [`tier-2-calibration.md`](tier-2-calibration.md).
 
 > [!NOTE]
-> The `esp32-oster-xpert` / `esp32-s3-oster-xpert` envs build with
-> `ESP32ESSO_THERMOBLOCK_NTC=1`, so the **thermoblock is read from the stock
-> NTC** and the thermocouple amp moves to the group. If you'd rather keep a
-> thermocouple on the thermoblock, drop that flag and wire per
-> [Tier 1](tier-1-wiring.md) instead (thermoblock TC on `CS`, group TC on `CS2`).
+> The default `esp32-oster-xpert` / `esp32-s3-oster-xpert` envs build with **two
+> thermocouples** (thermoblock TC on `CS`, group TC on `CS2`) — the recommended
+> setup. The `esp32-oster-xpert-ntc` / `esp32-s3-oster-xpert-ntc` envs build with
+> `ESP32ESSO_THERMOBLOCK_NTC=1` instead, reading the **thermoblock from the stock
+> NTC** and keeping the single group thermocouple on `CS`. Pick the env that
+> matches how you wired the thermoblock.
 
 > [!WARNING]
 > Same mains-safety rules as Tier 1 apply. Disconnect from the wall and verify
@@ -46,24 +51,64 @@ your setpoint. See the cascade math in
 
 | Signal | ESP32-WROOM (`esp32-oster-xpert`) | ESP32-S3 (`esp32-s3-oster-xpert`) |
 | ------ | --------------------------------- | --------------------------------- |
-| NTC divider node (ADC) | GPIO 34 (ADC1_CH6, input-only) | GPIO 7 (ADC1_CH6) |
-| Group amp `CS` | GPIO 21 (Tier 1 pin) | GPIO 10 (Tier 1 pin) |
-| Group amp `SCK` | GPIO 18 | GPIO 12 |
-| Group amp `SO` / `MISO` | GPIO 19 | GPIO 13 |
-| Group amp `CS2` (dual-TC only) | GPIO 22 | GPIO 11 |
-| Heater SSR | GPIO 4 | GPIO 4 |
-| Brew switch (optional) | GPIO 27 | GPIO 5 |
+| Amp `SCK` (shared bus) | GPIO 18 | GPIO 12 |
+| Amp `SO` / `MISO` (shared bus) | GPIO 19 | GPIO 13 |
+| Thermoblock amp `CS` (dual-TC, default) | GPIO 21 (Tier 1 pin) | GPIO 10 (Tier 1 pin) |
+| Group amp `CS2` (dual-TC, default) | GPIO 22 | GPIO 11 |
+| Group amp `CS` (`-ntc` build) | GPIO 21 (Tier 1 pin) | GPIO 10 (Tier 1 pin) |
+| NTC divider node (ADC, `-ntc` build) | GPIO 34 (ADC1_CH6, input-only) | GPIO 7 (ADC1_CH6) |
+| Heater SSR | GPIO **23** (D23) | GPIO 4 |
+| Brew SSR (pump/valve) | GPIO 27 | GPIO 5 |
 | Relief-valve SSR (optional) | GPIO 26 | GPIO 14 |
 | Pressure divider node (ADC, optional) | GPIO 35 (ADC1_CH7, input-only) | GPIO 8 (ADC1_CH7) |
+
+In the default dual-thermocouple build the thermoblock amp keeps the Tier 1 `CS`
+pin and the group amp is added on `CS2`. In the `-ntc` build there is no
+thermoblock amp, so the single group amp sits on `CS` and `CS2` is unused.
 
 Use **ADC1** channels only for the analog sensors — ADC2 is unavailable while
 the BLE radio is on. Tie all sensor grounds to the ESP32 `GND`.
 
-## Thermoblock NTC (stock sensor)
+## Thermoblock sensor: two thermocouples (recommended) or the stock NTC
+
+The thermoblock needs its own probe for the inner/safety loop. Pick **one** of
+the two options below and flash the matching env.
+
+### Thermoblock thermocouple (recommended, default env)
+
+The recommended setup puts a **second thermocouple, identical to the group one**,
+on the thermoblock — the exact amp + probe combo you used for Tier 1. The Tier 2
+default build (`esp32-oster-xpert` / `esp32-s3-oster-xpert`) just adds a matching
+amp for the group.
+
+Why prefer it over the stock NTC:
+
+- **Linear + cold-junction-compensated** reading straight from the amp — no
+  resistance-vs-temperature fit, no per-unit `R0`/`Beta` soak calibration.
+- **Low drift** and repeatable across units; the NTC ages and each probe differs.
+- **Fault flags** (open/short on MAX31855; empty-bus detection on MAX6675)
+  instead of a divider voltage you have to sanity-check.
+
+Wiring: clamp a K-type probe to the **thermoblock** (as in
+[Tier 1](tier-1-wiring.md)), wire its amp `VCC`/`GND` to `3V3`/`GND` and
+`SCK`/`SO` to the shared bus, and put its `CS` on the **Tier 1 pin** (GPIO 21 on
+WROOM, GPIO 10 on S3). The group amp then takes **`CS2`** (see
+[Group thermocouple](#group-thermocouple)). Both amps must be the **same type**
+(two MAX6675 on WROOM, two MAX31855 on S3), sharing `SCK`/`SO` with only `CS`
+per-device.
+
+> [!TIP]
+> If you already ran Tier 1, the thermoblock amp is done — upgrading to Tier 2 is
+> literally "add the second amp on `CS2` and clamp its probe at the group." No NTC
+> divider, no calibration soak.
+
+### Thermoblock NTC (stock sensor, `-ntc` build)
 
 The Sunbeam Barista Max / Oster Xpert ships a **100 kΩ-at-25 °C NTC thermistor**
-(M5 brass-tip probe) on the thermoblock. Reuse it as the inner/safety sensor via
-a resistor divider into an ESP32 **ADC1** channel.
+(M5 brass-tip probe) on the thermoblock. The `-ntc` build
+(`esp32-oster-xpert-ntc` / `esp32-s3-oster-xpert-ntc`) reuses it as the
+inner/safety sensor via a resistor divider into an ESP32 **ADC1** channel — you
+save the second amp/probe, at the cost of a calibration soak and more drift.
 
 Wire a divider with a **100 kΩ 1 % series resistor** as the pull-up:
 
@@ -92,31 +137,33 @@ Wire a divider with a **100 kΩ 1 % series resistor** as the pull-up:
 - **No stock NTC / adding one.** A generic **100 kΩ 3950 glass-bead or
   screw-probe NTC** is a drop-in; screw-probe (M4/M5/M6) types clamp to the
   block better than glass beads.
-- **Skip the NTC entirely** by dropping `ESP32ESSO_THERMOBLOCK_NTC` and running
-  a thermocouple on the thermoblock (Tier 1 wiring) — you lose the "free" stock
-  sensor but gain a linear, cold-junction-compensated reading.
+- **Skip the NTC entirely** by flashing the default (non-`-ntc`) env and running
+  a thermocouple on the thermoblock — the **recommended** path (see above). You
+  lose the "free" stock sensor but gain a linear, cold-junction-compensated
+  reading with no calibration soak.
 
 See [`tier-2-calibration.md`](tier-2-calibration.md) for turning the raw divider
 reading into accurate °C, and for the open/short fault behaviour.
 
 ## Group thermocouple
 
-With the NTC on the thermoblock, the **same MAX6675 amp from Tier 1** reads the
-**group** — only the probe moves to the portafilter. Keep `CS` on the **Tier 1
-pin** (GPIO 21 on WROOM); you do not need a second amp or CS2 unless you run
-dual-thermocouple builds without the NTC.
+A thermocouple at the group reads the water at the puck. Which `CS` pin it uses
+depends on the build:
 
-> GPIO 22 (WROOM) / GPIO 11 (S3) is **CS2**, used only when *both* thermoblock
-> and group are thermocouples (no NTC). With `ESP32ESSO_THERMOBLOCK_NTC`, the
-> firmware reads the group amp on the Tier 1 `CS` pin above.
+- **Default dual-thermocouple build:** the thermoblock amp occupies the Tier 1
+  `CS` pin, so the group amp is the **second amp on `CS2`** (GPIO 22 on WROOM,
+  GPIO 11 on S3), sharing `SCK`/`SO` with the thermoblock amp.
+- **`-ntc` build:** there is no thermoblock amp, so the single group amp keeps the
+  **Tier 1 `CS` pin** (GPIO 21 on WROOM, GPIO 10 on S3) and `CS2` is unused.
 
 1. Mount the K-type probe against the **portafilter adapter / group outlet**, as
    close to where the water exits over the puck as you can clamp it. Insulate the
    bead from ambient airflow so it reads water temperature, not case air.
 2. Wire the amp's `VCC`/`GND` to the ESP32 `3V3`/`GND` (**use `3V3`, not `5V`**),
-   `SCK`/`SO` to the GPIOs above, and `CS` to **GPIO 21** (same as Tier 1).
+   `SCK`/`SO` to the shared-bus GPIOs above, and `CS` to **`CS2`** in the default
+   build (**`CS`** in the `-ntc` build).
 3. If the group amp is missing or faults, the firmware degrades to single-sensor
-   behaviour (controls the thermoblock NTC at the setpoint directly) and the app
+   behaviour (controls the thermoblock at the setpoint directly) and the app
    shows "group sensor offline".
 
 **Alternatives / equivalents**
@@ -134,10 +181,19 @@ dual-thermocouple builds without the NTC.
 ## Pressure transducer (optional, Tier 3-ready)
 
 A brew-line pressure reading lets the app graph pressure alongside temperature
-and is the foundation for Tier 3 pressure profiling. The firmware exposes the
-`pressure_bar` field as a `NaN` stub until the Tier 3 driver ships
-([`../../protocol/ble/tier2.md`](../../protocol/ble/tier2.md)), but the sensor
-and its analog front-end can be wired now.
+and is the foundation for Tier 3 pressure profiling. With the
+`ESP32ESSO_PRESSURE_ADC` flag (set on the `esp32-oster-xpert` /
+`esp32-s3-oster-xpert` envs), the firmware samples the transducer every control
+tick, rejects the vibration pump's spikes with a per-read median, and smooths the
+50/60 Hz ripple with an adaptive filter before publishing `pressure_bar`
+([`../../protocol/ble/tier2.md`](../../protocol/ble/tier2.md)). Drop the flag to
+leave the field as a `NaN` stub.
+
+> [!TIP]
+> The firmware filter trades a little lag for ripple rejection. If the reading
+> still looks noisy, or lags a real pressure ramp too much, add the hardware
+> **RC cap** below (start at 100 nF, grow toward 1 µF) — that anti-aliases the
+> pump ripple at the source and lets the firmware filter run lighter.
 
 **Recommended sensor.** A **ratiometric automotive/industrial transducer**,
 0–1.2 MPa (**0–12 bar**), **G1/8" or 1/8" NPT** stainless thread, 5 V supply,
@@ -191,27 +247,31 @@ sensor OUT ──[ 10 kΩ 1% ]──┬── ADC pin (GPIO 35 / GPIO 8)
   Honeywell/TE part) skips the divider and ADC noise entirely, at higher cost
   and a different driver — wire it to the I²C pins instead of an ADC channel.
 
-## Brew switch (optional, for the auto shot timer)
+## Brew SSR (pump + valve, app-controlled)
 
-The shot timer can start automatically when the brew switch closes. If you
-don't wire it, use the **Start shot** button in the app instead.
+The **Start shot** / **Stop shot** buttons in the app drive a brew SSR on
+**GPIO 27** (WROOM) / **GPIO 5** (S3). While a shot is running, the firmware
+holds the SSR **on** (pump + brew valve energized); when you stop the shot, the
+SSR turns off and the relief-valve pulse fires (see below).
 
-1. Find a dry-contact signal that closes when brewing starts (a spare pole on
-   the brew rocker, or a low-current relay/optocoupler across the pump-switch
-   contacts — **never** tap mains directly into the GPIO).
-2. Wire one side to the brew-switch GPIO above and the other to ESP32 `GND`.
-   The input uses the internal pull-up and reads active-low (closed = brewing),
-   debounced in firmware.
+Wire the SSR module's **IN** for this channel to the brew GPIO and **GND** (same
+5 V dual-channel boards as the relief SSR are usually **active LOW**: 0 V = ON).
+The **AC load side** follows the same L/load/SSR/N pattern as the relief valve
+(one valve leg on **L**, SSR **AC2** on the other leg, SSR **AC1** on **N**).
 
-## Pressure-relief valve (optional, dumps pressure after a shot)
+The stock front-panel brew switch is **not** read by the firmware on this build;
+brewing is app-only unless you add a separate input later.
+
+## Pressure-relief valve (optional, 3-way-style vent)
 
 Machines without a stock 3-way valve (the Oster Xpert is one — `hasThreeWayValve`
 is `false`) trap brew pressure in the puck when the shot ends, giving a wet puck
-and drips. A solenoid relief valve teed into the brew line fixes this: the
-firmware **pulses it open for 1 second when a shot ends** (`kReliefPulseMs` in
-`firmware/src/control/temperature_loop.cpp`) to dump residual pressure, then
-closes it. The valve is closed at all other times, and a new shot starting
-cancels any in-flight pulse.
+and drips. A solenoid relief valve teed into the brew line fixes this by
+mimicking a 3-way valve: the firmware holds it **open (venting to the drip tray)
+whenever a shot is not running**, **closes it the instant a shot starts** so the
+pump can build pressure, and **reopens it when the shot ends** — so it commutes
+closed → open around every shot and stays open through idle
+(`updateReliefValve` in `firmware/src/control/temperature_loop.cpp`).
 
 The valve is driven from a **second SSR** on its own GPIO, wired exactly like the
 heater SSR — same brick, same drive caveats (see
@@ -231,13 +291,22 @@ SSR DC - ── ESP32 GND
 
 1. Fit a **normally-closed mains solenoid valve** teed into the brew line (a
    brass T on the pump outlet / group inlet), with its outlet routed to the
-   **drip tray**. Energising the valve opens the path and relieves pressure.
+   **drip tray**. Energising the valve opens the path and vents pressure.
 2. Switch the valve's mains leg through the **second SSR**, mounted on a
    heatsink like the heater SSR. Keep it on the low/return side you can reach
    safely and torque all fittings — the line sees 9–12 bar.
-3. Drive the SSR's DC input from the relief-valve GPIO above. The output is
-   active-high; the firmware forces it closed at boot and whenever no valve is
-   bound.
+3. Drive the SSR's DC input from the relief-valve GPIO above. The firmware holds
+   the valve **open while idle** and closes it only while a shot runs; at boot
+   and whenever no valve is bound it is de-energised (**closed**), so a reset
+   cannot leave the line venting mid-shot.
+
+> [!IMPORTANT]
+> Because the NC valve is now held **open (energised) the whole time the machine
+> is idle**, its coil sees near-continuous duty. Use a solenoid **rated for
+> continuous duty** (most mains brew solenoids are), or it may overheat. If you
+> prefer the coil de-energised at rest, invert the valve mechanically (use a
+> **normally-open** valve) — then idle = de-energised = vented, and the firmware
+> logic is unchanged.
 
 **Alternatives / equivalents**
 
@@ -245,10 +314,8 @@ SSR DC - ── ESP32 GND
   low-side **logic-level MOSFET** (with a flyback diode across the coil) from the
   same GPIO; power the coil from a 12/24 V rail.
 - **3-way vs 2-way.** A 3-way valve vents the group side directly; a 2-way valve
-  teed to the drip tray works too. Either way the firmware just pulses the one
-  output.
-- **Pulse length.** Adjust `kReliefPulseMs` if 1 s under- or over-vents your
-  line.
+  teed to the drip tray works too. Either way the firmware just drives the one
+  output open/closed.
 
 > [!WARNING]
 > This is a **second mains-switched load**. All the Tier 1 mains-safety rules
@@ -259,9 +326,10 @@ SSR DC - ── ESP32 GND
 ## After first boot
 
 - The app shows two temperatures: **group** (the target) and **thermoblock**.
-- Raise the **cascade gain** until the group holds your setpoint during a shot;
-  `0` disables compensation.
+- Adjust the **thermoblock offset** (signed ±20 °C) until the group holds your
+  setpoint during a shot; `0` runs the thermoblock at the group setpoint.
 - Pull a shot (button or switch) and confirm the **shot timer** runs and the
   **brew graph** traces both temperatures.
-- Before trusting the thermoblock reading, calibrate the NTC — see
-  [`tier-2-calibration.md`](tier-2-calibration.md).
+- **`-ntc` build only:** before trusting the thermoblock reading, calibrate the
+  NTC — see [`tier-2-calibration.md`](tier-2-calibration.md). The default
+  dual-thermocouple build needs no calibration soak.

@@ -59,8 +59,8 @@ this platform.
 3. Wire a 25 A opto-isolated SSR in series with the brew thermostat's
    load side (the stock thermostat stays in place as a thermal-fuse-style
    backup; the SSR can only cut, never boost).
-4. Drive the SSR opto input from the ESP32's heater-SSR GPIO (GPIO 4 on
-   both the WROOM and S3 maps) through a 220 ohm current-limiting resistor.
+4. Drive the SSR opto input from the ESP32's heater-SSR GPIO (GPIO **23** (D23) on
+   WROOM, GPIO 4 on S3) through a 220 ohm current-limiting resistor.
 5. Connect the thermocouple amplifier to the ESP32 (`VCC=3V3`, `GND=GND`,
    and `CS`/`SCK`/data per your board). **WROOM** (`esp32-oster-xpert`)
    expects a **MAX6675** module (`CS=21`, `SCK=18`, `SO=19`). **S3**
@@ -78,22 +78,41 @@ Wiring diagram lives at `hardware/oster-xpert/tier-1-wiring.md`.
 
 ## Tier 2 install plan (group-referenced temperature)
 
-Tier 2 splits sensing into a cascade: the **stock 100 kΩ NTC thermistor** stays
-on the thermoblock (inner/safety loop, via an ADC divider) and a **thermocouple
-moves to the portafilter/group** to measure the water at the puck. The user
-setpoint becomes the **cup** target. Because the water loses heat over the
-~20 cm path from the thermoblock (PTFE tubing + valves), the firmware runs the
-thermoblock hotter by a phone-tunable amount:
+Tier 2 splits sensing into two probes: one on the **thermoblock** (inner/safety
+loop) and one **thermocouple at the portafilter/group** to measure the water at
+the puck. The user setpoint becomes the **cup** target, and the firmware runs the
+thermoblock hotter by a phone-tunable amount to compensate for the heat lost over
+the ~20 cm path (PTFE tubing + valves):
 
-`thermoblockSetpoint = groupSetpoint + gain × (groupSetpoint − groupTemp)`,
+`thermoblockSetpoint = groupSetpoint + offset`,
 
-clamped to a bounded offset and the safety cap. Gain `0` disables compensation.
-An optional brew-switch tap auto-starts the shot timer (a manual button in the
-app works without it). The NTC divider pin map, the group thermocouple wiring,
-the optional pressure-transducer front-end, and the brew-switch tap are in
+with the offset a signed ±20 °C slider (or an absolute manual thermoblock
+setpoint that overrides it), clamped to the safety cap. An optional brew-switch
+tap auto-starts the shot timer (a manual button in the app works without it).
+
+### Thermoblock sensor: two thermocouples (recommended) vs. the stock NTC
+
+There are two ways to read the thermoblock, and the build env picks which:
+
+- **Two thermocouples (default, `esp32-oster-xpert` / `esp32-s3-oster-xpert`).**
+  Add a **second thermocouple identical to the group one** on the thermoblock —
+  the same amp and probe you already used for Tier 1, now joined by a matching
+  amp for the group. This is the **recommended** setup: the reading is linear and
+  cold-junction-compensated, needs no per-unit resistance fit or calibration
+  soak, and drifts far less than a thermistor. Wiring is just "Tier 1 + a second
+  amp for the group" (thermoblock amp on `CS`, group amp on `CS2`).
+- **Stock NTC thermistor (alternative, `esp32-oster-xpert-ntc` /
+  `esp32-s3-oster-xpert-ntc`).** Reuse the machine's stock 100 kΩ NTC on the
+  thermoblock via an ADC divider and keep the single group thermocouple on `CS`.
+  You save the cost of a second amp/probe but must calibrate the NTC and accept
+  more drift. Kept as an option for people who prefer the "free" stock sensor.
+
+The dual-thermocouple pin map, the NTC divider front-end, the group thermocouple
+wiring, the optional pressure-transducer front-end, and the brew-switch tap are in
 [`hardware/oster-xpert/tier-2-wiring.md`](../../hardware/oster-xpert/tier-2-wiring.md);
-reusing and calibrating the stock NTC (fixed-point and common-heater methods) is
-in [`hardware/oster-xpert/tier-2-calibration.md`](../../hardware/oster-xpert/tier-2-calibration.md);
+calibrating the stock NTC (fixed-point and common-heater methods), only needed for
+the `-ntc` build, is in
+[`hardware/oster-xpert/tier-2-calibration.md`](../../hardware/oster-xpert/tier-2-calibration.md);
 the BLE fields are in [`protocol/ble/tier2.md`](../../protocol/ble/tier2.md).
 
 ## PID tuning procedure (post-Tier-1 install)

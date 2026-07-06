@@ -2,6 +2,9 @@
 
 #include "board/board_config.h"
 #include "hal/gpio_discrete_output.h"
+#if defined(ESP32ESSO_PRESSURE_ADC)
+#include "hal/analog_pressure_sensor.h"
+#endif
 #if defined(ESP32ESSO_THERMOCOUPLE_MAX6675)
 #include "hal/max6675_sensor.h"
 #else
@@ -9,9 +12,6 @@
 #endif
 #if defined(ESP32ESSO_THERMOBLOCK_NTC)
 #include "hal/ntc_thermistor_sensor.h"
-#endif
-#if defined(ESP32ESSO_TIER2)
-#include "hal/gpio_discrete_input.h"
 #endif
 #include "profile/machine_profile.h"
 
@@ -30,6 +30,13 @@ using ThermocoupleSensor = hal::Max6675Sensor;
 using ThermocoupleSensor = hal::Max31855Sensor;
 #endif
 
+// Thermoblock sensor. The default (and recommended) build puts a thermocouple
+// here -- identical to the group probe -- read on the Tier 1 CS pin. Two
+// matched thermocouples give a linear, cold-junction-compensated reading with
+// no per-unit resistance fit and far less drift than the stock thermistor, so
+// prefer this unless you specifically want to reuse the machine's NTC.
+// Defining ESP32ESSO_THERMOBLOCK_NTC (the `-ntc` build) swaps in the stock
+// 100k NTC instead; that path is kept so people can opt for either sensor.
 #if defined(ESP32ESSO_THERMOBLOCK_NTC)
 // Stock 100k NTC on the thermoblock via a 3V3 → 100k → ADC → NTC → GND divider.
 // R0 trimmed on the prototype against the portafilter K-type on the same block
@@ -48,12 +55,15 @@ ThermocoupleSensor g_brewTempSensor(kPins.thermocoupleCs,
                                     kPins.thermocoupleSck,
                                     kPins.thermocoupleMiso);
 #endif
+// Heater Fotek SSR (3–32 V input): HIGH = on. Brew/relief use active-low 5 V boards.
 hal::GpioDiscreteOutput g_heaterRelay(kPins.heaterSsr, /*activeHigh=*/true);
 
 #if defined(ESP32ESSO_TIER2)
-// Tier 2: thermocouple at the portafilter/group. When the thermoblock uses the
-// stock NTC, the single MAX6675 amp stays on the Tier 1 CS pin (GPIO 21);
-// only dual-thermocouple builds use CS2.
+// Tier 2: thermocouple at the portafilter/group, sharing the SPI bus with the
+// thermoblock amp (only CS differs). In the recommended dual-thermocouple build
+// the thermoblock amp keeps the Tier 1 CS pin (GPIO 21) and the group amp lands
+// on CS2 (GPIO 22). In the NTC build there is no thermoblock amp, so the single
+// group amp stays on the Tier 1 CS pin (GPIO 21) and CS2 is unused.
 #if defined(ESP32ESSO_THERMOBLOCK_NTC)
 ThermocoupleSensor g_groupTempSensor(kPins.thermocoupleCs,
                                      kPins.thermocoupleSck,
@@ -63,9 +73,16 @@ ThermocoupleSensor g_groupTempSensor(kPins.thermocoupleCs2,
                                      kPins.thermocoupleSck,
                                      kPins.thermocoupleMiso);
 #endif
-hal::GpioDiscreteInput g_brewSwitch(kPins.brewSwitch, /*activeLow=*/true);
-// Relief/3-way valve driven by a second SSR/MOSFET; pulsed open after a shot.
-hal::GpioDiscreteOutput g_solenoidValve(kPins.solenoidValve, /*activeHigh=*/true);
+// Brew pump/valve SSR; activeLow matches common 5 V dual-channel SSR boards.
+hal::GpioDiscreteOutput g_brewRelay(kPins.brewSsr, /*activeHigh=*/false);
+// Relief valve SSR; activeLow matches common 5 V dual-channel SSR boards.
+hal::GpioDiscreteOutput g_solenoidValve(kPins.solenoidValve, /*activeHigh=*/false);
+#if defined(ESP32ESSO_PRESSURE_ADC)
+// Ratiometric 0.5-4.5 V / 0-12 bar transducer through a 2:1 divider (see
+// hardware/oster-xpert/tier-2-wiring.md). Defaults match the documented front
+// end; refine the calibration once a reference gauge is available.
+hal::AnalogPressureSensor g_pressureSensor(kPins.pressureAdc);
+#endif
 #endif
 
 const MachineProfile kOsterXpertProfile = {
@@ -91,12 +108,12 @@ const MachineProfile kOsterXpertProfile = {
             .pidKd = 1.50f,
             .pwmWindowMs = 1000,
             // The group sits ~20 cm downstream through PTFE + valves, so the
-            // thermoblock must run hotter than the cup target. Gain 4 seeds a
-            // sensible over-drive; tune from the phone (0..10). The offset is
-            // bounded so a cold group at idle cannot walk the thermoblock to
-            // the safety cap.
-            .defaultCascadeGain = 4.0f,
-            .maxCascadeOffsetC = 30.0f,
+            // thermoblock must run hotter than the cup target. Seed the slider
+            // at +8 °C above the cup target on first boot; the phone tunes it
+            // live in ±20 °C. The bound keeps the safety cap out of reach even
+            // when the user pushes the offset to the extreme.
+            .defaultThermoblockOffsetC = 8.0f,
+            .maxThermoblockOffsetC = 20.0f,
         },
     .hydraulic =
         {
@@ -121,11 +138,15 @@ const MachineProfile kOsterXpertProfile = {
     .solenoidValve = nullptr,
 #endif
 #if defined(ESP32ESSO_TIER2)
-    .brewSwitch = &g_brewSwitch,
+    .brewRelay = &g_brewRelay,
 #else
-    .brewSwitch = nullptr,
+    .brewRelay = nullptr,
 #endif
-    .pressureSensor = nullptr,  // Tier 3+
+#if defined(ESP32ESSO_TIER2) && defined(ESP32ESSO_PRESSURE_ADC)
+    .pressureSensor = &g_pressureSensor,
+#else
+    .pressureSensor = nullptr,
+#endif
 };
 
 }  // namespace
@@ -144,11 +165,18 @@ hal::NtcThermistorSensor* thermoblockNtcSensor() {
 
 void initActiveProfilePeripherals() {
     g_brewTempSensor.begin();
-    g_heaterRelay.begin();
 #if defined(ESP32ESSO_TIER2)
     g_groupTempSensor.begin();
-    g_brewSwitch.begin();
+#endif
+    // GPIO outputs after SPI sensor init so GPIO 23 (heater, VSPI MOSI default)
+    // is not left claimed by the thermocouple bus driver.
+    g_heaterRelay.begin();
+#if defined(ESP32ESSO_TIER2)
+    g_brewRelay.begin();
     g_solenoidValve.begin();
+#if defined(ESP32ESSO_PRESSURE_ADC)
+    g_pressureSensor.begin();
+#endif
 #endif
 }
 
