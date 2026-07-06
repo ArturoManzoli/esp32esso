@@ -1,6 +1,7 @@
 package com.esp32esso.tier1.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -38,14 +40,21 @@ fun SettingsScreen(
     onApply: (MachineSettings) -> Unit,
     onBack: () -> Unit,
 ) {
-    Column(
-        modifier =
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+    // Wrap the scroll column in a Box so we can centre-cap it on tablets;
+    // 720 dp reads comfortably without stretching the fields to full width.
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        contentAlignment = Alignment.TopCenter,
     ) {
+      Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .widthIn(max = 720.dp)
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+      ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = EssoOrange)
@@ -66,6 +75,7 @@ fun SettingsScreen(
         var ki by remember(settings) { mutableStateOf(settings.ki.toString()) }
         var kd by remember(settings) { mutableStateOf(settings.kd.toString()) }
         var steam by remember(settings) { mutableStateOf(settings.steamSetpointC.toString()) }
+        var heaterTimeout by remember(settings) { mutableStateOf(settings.heaterTimeoutMin.toString()) }
 
         FrostCard(accent = true) {
             sectionLabel("Inner PID (thermoblock)")
@@ -89,6 +99,19 @@ fun SettingsScreen(
             )
         }
 
+        FrostCard {
+            sectionLabel("Safety")
+            Spacer(Modifier.height(10.dp))
+            NumberField("Heater auto-off (minutes)", heaterTimeout) { heaterTimeout = it }
+            Text(
+                text = "Turns the heater off after this long with no activity " +
+                    "(setpoint/gain change, brew, or heater toggle). 0 disables it.",
+                style = MaterialTheme.typography.labelSmall,
+                color = EssoOnSurfaceMuted,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+
         Button(
             onClick = {
                 onApply(
@@ -97,6 +120,7 @@ fun SettingsScreen(
                         ki = ki.toFloatOrNull() ?: settings.ki,
                         kd = kd.toFloatOrNull() ?: settings.kd,
                         steamSetpointC = steam.toFloatOrNull() ?: settings.steamSetpointC,
+                        heaterTimeoutMin = heaterTimeout.toFloatOrNull() ?: settings.heaterTimeoutMin,
                     ),
                 )
                 onBack()
@@ -105,6 +129,7 @@ fun SettingsScreen(
         ) {
             Text("Save to controller")
         }
+      }
     }
 }
 
