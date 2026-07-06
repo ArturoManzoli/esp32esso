@@ -15,6 +15,9 @@ void GpioDiscreteOutput::begin() {
 void GpioDiscreteOutput::set(bool on) {
     on_ = on;
     const bool level = activeHigh_ ? on : !on;
+    // Reclaim the pin on every write — SPI.begin() on the shared thermocouple
+    // bus can leave VSPI MOSI (GPIO 23) attached to the driver on some cores.
+    pinMode(pin_, OUTPUT);
     digitalWrite(pin_, level ? HIGH : LOW);
 }
 

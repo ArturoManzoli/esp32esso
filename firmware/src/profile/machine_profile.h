@@ -31,13 +31,15 @@ struct ThermalConfig {
     float pidKd;
     uint32_t pwmWindowMs;     // slow-PWM window for the SSR heater driver
 
-    // Tier 2 cascade: the user setpoint targets the group/portafilter sensor,
-    // and the thermoblock is driven hotter to overcome the transport loss.
-    // thermoblockSetpoint = groupSetpoint + gain * (groupSetpoint - groupTemp),
-    // clamped to [groupSetpoint, groupSetpoint + maxCascadeOffsetC] and the
-    // hard safety cap. `defaultCascadeGain` seeds the phone knob (0..10).
-    float defaultCascadeGain;
-    float maxCascadeOffsetC;
+    // Tier 2 offset: the user setpoint is the group/portafilter target, and
+    // the thermoblock setpoint is derived as groupSetpoint + offset. Positive
+    // offsets push the thermoblock hotter (compensating transport loss down to
+    // the puck); negative offsets pull it colder (e.g. for pre-warmed heads
+    // that overshoot). Clamped to [-maxThermoblockOffsetC, +maxThermoblockOffsetC]
+    // on top of the hard safety cap. `defaultThermoblockOffsetC` seeds the
+    // phone slider on first boot; the value persists in NVS thereafter.
+    float defaultThermoblockOffsetC;
+    float maxThermoblockOffsetC;
 };
 
 // Wet-side properties. Mostly informational for the user, but a few fields
@@ -67,10 +69,10 @@ struct MachineProfile {
     // directly against the user setpoint.
     hal::TemperatureSensor* groupTempSensor;
 
-    // Tier 1 (most machines) - 3-way solenoid + brew switch. brewSwitch, when
-    // present, auto-starts the Tier 2 shot timer.
+    // Tier 2 - relief/3-way solenoid (post-shot vent pulse) and brew SSR
+    // (pump/valve while the app shot timer is running).
     hal::DiscreteOutput* solenoidValve;
-    hal::DiscreteInput* brewSwitch;
+    hal::DiscreteOutput* brewRelay;
 
     // Tier 2+ - optional
     hal::PressureSensor* pressureSensor;

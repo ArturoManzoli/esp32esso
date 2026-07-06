@@ -26,8 +26,8 @@ const MachineProfile kStubProfile = {
             .pidKi = 0.0f,
             .pidKd = 0.0f,
             .pwmWindowMs = 1000,
-            .defaultCascadeGain = 0.0f,
-            .maxCascadeOffsetC = 30.0f,
+            .defaultThermoblockOffsetC = 0.0f,
+            .maxThermoblockOffsetC = 20.0f,
         },
     .hydraulic =
         {
@@ -40,7 +40,7 @@ const MachineProfile kStubProfile = {
     .heaterRelay = nullptr,
     .groupTempSensor = nullptr,
     .solenoidValve = nullptr,
-    .brewSwitch = nullptr,
+    .brewRelay = nullptr,
     .pressureSensor = nullptr,
 };
 }  // namespace

@@ -8,7 +8,7 @@ namespace esp32esso::board {
 // this is the board Tier 2-4 (BLE, pressure/flow profiling, OTA) are
 // validated against. Thermocouple amps are read-only so no MOSI is wired.
 // Tier 2 adds a second CS (GPIO 11) for the group sensor, a brew-switch
-// input (GPIO 5), and a relief-valve output (GPIO 14).
+// brew SSR (GPIO 5), and a relief-valve output (GPIO 14).
 const BoardConfig& activeBoard() {
     static const BoardConfig kBoard = {
         .info =
@@ -25,8 +25,9 @@ const BoardConfig& activeBoard() {
                 .thermocoupleCs2 = 11,
                 .thermoblockNtc = 7,  // ADC1_CH6
                 .heaterSsr = 4,
-                .brewSwitch = 5,
-                .solenoidValve = 14,  // second SSR/MOSFET: relief-valve pulse
+                .brewSsr = 5,
+                .solenoidValve = 14,  // second SSR/MOSFET: relief/vent valve
+                .pressureAdc = 8,  // ADC1_CH7: brew-line transducer
             },
     };
     return kBoard;

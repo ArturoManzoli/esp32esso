@@ -9,7 +9,7 @@ namespace esp32esso::board {
 // (GPIO 0/2/5/12/15). SCK/SO follow the VSPI defaults; the MAX6675 amps
 // (esp32-oster-xpert) are read-only SPI so no MOSI is wired. Tier 2 adds a
 // second CS (GPIO 22) for the group sensor, a pullup-capable brew-switch
-// input (GPIO 27), and a relief-valve output (GPIO 26); all unused until the
+// brew SSR (GPIO 27), and a relief-valve output (GPIO 26); all unused until the
 // Tier 2 build.
 const BoardConfig& activeBoard() {
     static const BoardConfig kBoard = {
@@ -26,9 +26,10 @@ const BoardConfig& activeBoard() {
                 .thermocoupleMiso = 19,
                 .thermocoupleCs2 = 22,
                 .thermoblockNtc = 34,  // ADC1_CH6, input-only (no pull needed)
-                .heaterSsr = 4,
-                .brewSwitch = 27,
-                .solenoidValve = 26,  // second SSR/MOSFET: relief-valve pulse
+                .heaterSsr = 23,  // D23 on the 38-pin WROOM DevKit
+                .brewSsr = 27,
+                .solenoidValve = 26,  // second SSR/MOSFET: relief/vent valve
+                .pressureAdc = 35,  // ADC1_CH7, input-only: brew-line transducer
             },
     };
     return kBoard;

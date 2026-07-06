@@ -1,5 +1,7 @@
 #include "control/temperature_loop.h"
 
+#include <Arduino.h>  // Serial for the flush/offset trace lines
+
 #include <cmath>
 
 namespace esp32esso::control {
@@ -7,7 +9,17 @@ namespace esp32esso::control {
 namespace {
 constexpr uint32_t kPidPeriodMs = 200;  // 5 Hz; thermocouple settles slowly
 constexpr float kMaxBrewSetpointC = 110.0f;  // brew target never needs to exceed this
-constexpr uint32_t kReliefPulseMs = 1000;  // hold the relief valve open this long after a shot
+constexpr uint32_t kFlushDurationMs = 3000;  // grouphead flush pulse length
+
+// Adaptive EMA for the brew-line pressure. The vibration pump injects ~50/60 Hz
+// ripple (and the occasional spike); the sensor's per-read median already kills
+// spikes, and this filter tames the ripple. alpha scales with the size of the
+// change so steady pressure is smoothed hard (alphaMin) while a real ramp/step
+// (shot start, OPV crack) tracks quickly (alphaMax), keeping lag low where it
+// matters. deltaFullBar is the change that reaches full responsiveness.
+constexpr float kPressAlphaMin = 0.04f;
+constexpr float kPressAlphaMax = 0.55f;
+constexpr float kPressDeltaFullBar = 1.0f;
 
 // NTC calibration bench tunables. The reference is the thermocouple (group
 // sensor); the NTC is only logged. The bench holds constant duty rungs and
@@ -34,7 +46,7 @@ void TemperatureLoop::begin(const profile::MachineProfile& profile) {
     ki_ = profile.thermal.pidKi;
     kd_ = profile.thermal.pidKd;
     steamSetpoint_ = profile.thermal.steamTempC;
-    gain_ = profile.thermal.defaultCascadeGain;
+    thermoblockOffsetC_ = profile.thermal.defaultThermoblockOffsetC;
     pid_.setGains(kp_, ki_, kd_);
     pid_.setOutputLimits(0.0f, 1.0f);
     pid_.reset();
@@ -43,14 +55,24 @@ void TemperatureLoop::begin(const profile::MachineProfile& profile) {
     groupTempC_ = NAN;
     groupOk_ = false;
     thermoblockSetpoint_ = setpoint_;
+    manualThermoblockActive_ = false;
+    manualThermoblockSetpoint_ = NAN;
     faulted_ = false;
     faultReason_ = "";
+    heaterEnabled_ = true;
+    lastActivityMs_ = 0;
+    activityPending_ = true;  // start the timeout window fresh at boot
     brewing_ = false;
     manualBrew_ = false;
     brewSource_ = 0;
     shotStartMs_ = 0;
+    preinfusionPhase_ = 0;
+    preinfusionPhaseStartMs_ = 0;
+    flushing_ = false;
+    flushUntilMs_ = 0;
     reliefValveOpen_ = false;
-    reliefOpenedMs_ = 0;
+    pressureBar_ = NAN;
+    pressureOk_ = false;
     lastPidMs_ = 0;
     windowStartMs_ = 0;
     windowOnTimeMs_ = 0;
@@ -62,6 +84,9 @@ void TemperatureLoop::begin(const profile::MachineProfile& profile) {
     if (profile.solenoidValve) {
         profile.solenoidValve->set(false);
     }
+    if (profile.brewRelay) {
+        profile.brewRelay->set(false);
+    }
 }
 
 void TemperatureLoop::tick(uint32_t nowMs) {
@@ -70,7 +95,12 @@ void TemperatureLoop::tick(uint32_t nowMs) {
         return;
     }
     updateBrewState(nowMs);
-    updateReliefValve(nowMs);
+    updatePreinfusion(nowMs);
+    updateFlush(nowMs);
+    updateBrewRelay();
+    updateReliefValve();
+    updatePressure();
+    updateHeaterTimeout(nowMs);
     if (cal_.active) {
         runCalibrationStep(nowMs);
     } else if (tuning_.active) {
@@ -91,13 +121,50 @@ void TemperatureLoop::setSetpointCelsius(float c) {
     if (c < lo) c = lo;
     if (c > hi) c = hi;
     setpoint_ = c;
+    activityPending_ = true;
 }
 
-void TemperatureLoop::setGain(float gain) {
-    if (std::isnan(gain)) return;
-    if (gain < 0.0f) gain = 0.0f;
-    if (gain > 10.0f) gain = 10.0f;
-    gain_ = gain;
+void TemperatureLoop::setThermoblockOffsetC(float offsetC) {
+    if (profile_ == nullptr || std::isnan(offsetC)) return;
+    const float bound = profile_->thermal.maxThermoblockOffsetC;
+    if (offsetC < -bound) offsetC = -bound;
+    if (offsetC > bound) offsetC = bound;
+    thermoblockOffsetC_ = offsetC;
+    // Touching the offset means the operator wants the relational (group +
+    // offset) behaviour again, so drop any absolute manual override.
+    manualThermoblockActive_ = false;
+    activityPending_ = true;
+    Serial.printf("# tb_offset: set to %.1f C (group_sp %.1f -> tb_sp %.1f)\n",
+                  thermoblockOffsetC_,
+                  setpoint_,
+                  computeThermoblockSetpoint());
+}
+
+void TemperatureLoop::setManualThermoblockSetpointC(float c) {
+    if (profile_ == nullptr) return;
+    // Non-positive / NaN clears the override (returns to group + offset).
+    if (std::isnan(c) || c <= 0.0f) {
+        clearManualThermoblockSetpoint();
+        return;
+    }
+    const float lo = profile_->thermal.minBrewTempC;
+    const float hi = profile_->thermal.maxSafeTempC - 5.0f;
+    if (c < lo) c = lo;
+    if (c > hi) c = hi;
+    manualThermoblockSetpoint_ = c;
+    manualThermoblockActive_ = true;
+    activityPending_ = true;
+    Serial.printf("# tb_manual: hold thermoblock at %.1f C (overrides group+offset)\n",
+                  manualThermoblockSetpoint_);
+}
+
+void TemperatureLoop::clearManualThermoblockSetpoint() {
+    if (manualThermoblockActive_) {
+        Serial.println(F("# tb_manual: cleared (back to group + offset)"));
+    }
+    manualThermoblockActive_ = false;
+    manualThermoblockSetpoint_ = NAN;
+    activityPending_ = true;
 }
 
 void TemperatureLoop::setPidGains(float kp, float ki, float kd) {
@@ -109,6 +176,7 @@ void TemperatureLoop::setPidGains(float kp, float ki, float kd) {
     ki_ = ki;
     kd_ = kd;
     pid_.setGains(kp_, ki_, kd_);
+    activityPending_ = true;
 }
 
 void TemperatureLoop::setSteamSetpointCelsius(float c) {
@@ -119,6 +187,14 @@ void TemperatureLoop::setSteamSetpointCelsius(float c) {
     if (c < profile_->thermal.minBrewTempC) c = profile_->thermal.minBrewTempC;
     if (c > hi) c = hi;
     steamSetpoint_ = c;
+    activityPending_ = true;
+}
+
+void TemperatureLoop::setHeaterTimeoutMinutes(float minutes) {
+    if (std::isnan(minutes) || minutes < 0.0f) return;
+    if (minutes > 240.0f) minutes = 240.0f;  // cap at 4 h
+    heaterTimeoutMin_ = minutes;
+    activityPending_ = true;
 }
 
 bool TemperatureLoop::hasGroupSensor() const {
@@ -127,6 +203,24 @@ bool TemperatureLoop::hasGroupSensor() const {
 
 void TemperatureLoop::setManualBrew(bool on) {
     manualBrew_ = on;
+    activityPending_ = true;
+}
+
+void TemperatureLoop::setPreinfusionSeconds(float seconds) {
+    if (std::isnan(seconds) || seconds < 0.0f) return;
+    if (seconds > 30.0f) seconds = 30.0f;
+    preinfusionSec_ = seconds;
+}
+
+void TemperatureLoop::setHeaterEnabled(bool on) {
+    heaterEnabled_ = on;
+    activityPending_ = true;  // re-enabling restarts the inactivity window
+    // Cut the SSR immediately so the phone toggle is felt this tick rather than
+    // waiting for the next slow-PWM window boundary.
+    if (!on && profile_ != nullptr && profile_->heaterRelay != nullptr) {
+        profile_->heaterRelay->set(false);
+        windowOnTimeMs_ = 0;
+    }
 }
 
 uint32_t TemperatureLoop::shotElapsedMs(uint32_t nowMs) const {
@@ -135,47 +229,165 @@ uint32_t TemperatureLoop::shotElapsedMs(uint32_t nowMs) const {
 }
 
 void TemperatureLoop::updateBrewState(uint32_t nowMs) {
-    const bool switchActive =
-        profile_->brewSwitch != nullptr && profile_->brewSwitch->read();
-    const bool active = manualBrew_ || switchActive;
+    const bool active = manualBrew_;
     if (active && !brewing_) {
         brewing_ = true;
         shotStartMs_ = nowMs;
-        brewSource_ = switchActive ? 2 : 1;
-        // A new shot supersedes any in-flight relief pulse.
-        reliefValveOpen_ = false;
+        brewSource_ = 1;
+        // Arm pre-infusion (pump-on phase) when configured; otherwise brew
+        // straight away (phase 0).
+        preinfusionPhase_ = (preinfusionSec_ >= 0.05f) ? 1 : 0;
+        preinfusionPhaseStartMs_ = nowMs;
     } else if (!active && brewing_) {
         brewing_ = false;
         brewSource_ = 0;
-        // Open the relief valve to dump residual pressure; updateReliefValve
-        // closes it again after kReliefPulseMs.
-        reliefValveOpen_ = true;
-        reliefOpenedMs_ = nowMs;
+        preinfusionPhase_ = 0;
     }
 }
 
-void TemperatureLoop::updateReliefValve(uint32_t nowMs) {
+void TemperatureLoop::updatePreinfusion(uint32_t nowMs) {
+    if (!brewing_ || preinfusionPhase_ == 0) {
+        return;
+    }
+    const uint32_t durMs = static_cast<uint32_t>(preinfusionSec_ * 1000.0f);
+    const uint32_t elapsed = nowMs - preinfusionPhaseStartMs_;
+    if (preinfusionPhase_ == 1 && elapsed >= durMs) {
+        preinfusionPhase_ = 2;  // pre-infuse done -> bloom pause (pump off)
+        preinfusionPhaseStartMs_ = nowMs;
+    } else if (preinfusionPhase_ == 2 && elapsed >= durMs) {
+        preinfusionPhase_ = 0;  // pause done -> main brew (pump on)
+        preinfusionPhaseStartMs_ = nowMs;
+    }
+}
+
+void TemperatureLoop::updateBrewRelay() {
+    if (profile_ == nullptr || profile_->brewRelay == nullptr) {
+        return;
+    }
+    // Pump runs whenever brewing (except during the pre-infusion bloom pause,
+    // phase 2), or during an operator-triggered grouphead flush. The relief
+    // valve is held closed for both cases (see updateReliefValve) so the
+    // pumped water reaches the shower screen instead of dumping to the tray.
+    const bool pumpFromShot = brewing_ && preinfusionPhase_ != 2;
+    const bool pumpOn = pumpFromShot || flushing_;
+    profile_->brewRelay->set(pumpOn);
+}
+
+void TemperatureLoop::updateReliefValve() {
     if (profile_ == nullptr || profile_->solenoidValve == nullptr) {
         return;
     }
-    if (reliefValveOpen_ && (nowMs - reliefOpenedMs_) >= kReliefPulseMs) {
-        reliefValveOpen_ = false;
-    }
+    // 3-way-style vent: open (relieve to the drip tray) whenever the machine is
+    // idle, and closed while a shot or grouphead flush is running so the pump
+    // can push water through the grouphead. Commutes closed the instant a shot
+    // starts or a flush begins, reopens the instant both end.
+    reliefValveOpen_ = !brewing_ && !flushing_;
     profile_->solenoidValve->set(reliefValveOpen_);
+}
+
+void TemperatureLoop::startFlush(uint32_t nowMs) {
+    if (brewing_) {
+        Serial.printf("# flush: refused (brewing) at t=%lu\n",
+                      static_cast<unsigned long>(nowMs));
+        return;  // the shot owns the pump; refuse to overlay a flush
+    }
+    flushing_ = true;
+    flushUntilMs_ = nowMs + kFlushDurationMs;
+    activityPending_ = true;
+    Serial.printf("# flush: start at t=%lu until t=%lu\n",
+                  static_cast<unsigned long>(nowMs),
+                  static_cast<unsigned long>(flushUntilMs_));
+}
+
+void TemperatureLoop::stopFlush() {
+    if (flushing_) {
+        Serial.println(F("# flush: stop"));
+    }
+    flushing_ = false;
+    flushUntilMs_ = 0;
+}
+
+void TemperatureLoop::updateFlush(uint32_t nowMs) {
+    if (!flushing_) return;
+    // Cancel the flush the instant a shot starts (brewing wins) or the timer
+    // expires. Wrap-safe comparison via the signed difference.
+    if (brewing_ || static_cast<int32_t>(flushUntilMs_ - nowMs) <= 0) {
+        stopFlush();
+    }
+}
+
+uint32_t TemperatureLoop::flushRemainingMs(uint32_t nowMs) const {
+    if (!flushing_) return 0;
+    const int32_t remaining = static_cast<int32_t>(flushUntilMs_ - nowMs);
+    return remaining > 0 ? static_cast<uint32_t>(remaining) : 0;
+}
+
+void TemperatureLoop::updatePressure() {
+    if (profile_ == nullptr || profile_->pressureSensor == nullptr) {
+        pressureBar_ = NAN;
+        pressureOk_ = false;
+        return;
+    }
+    const float raw = profile_->pressureSensor->readBar();
+    pressureOk_ = profile_->pressureSensor->ok() && !std::isnan(raw);
+    if (!pressureOk_) {
+        pressureBar_ = NAN;
+        return;
+    }
+    if (std::isnan(pressureBar_)) {
+        pressureBar_ = raw;  // seed the filter on the first good sample
+        return;
+    }
+    const float delta = raw - pressureBar_;
+    float responsiveness = std::fabs(delta) / kPressDeltaFullBar;
+    if (responsiveness > 1.0f) responsiveness = 1.0f;
+    const float alpha =
+        kPressAlphaMin + (kPressAlphaMax - kPressAlphaMin) * responsiveness;
+    pressureBar_ += alpha * delta;
+}
+
+void TemperatureLoop::updateHeaterTimeout(uint32_t nowMs) {
+    if (lastActivityMs_ == 0) lastActivityMs_ = nowMs;
+    if (activityPending_) {
+        activityPending_ = false;
+        lastActivityMs_ = nowMs;
+    }
+    // A running shot (or the tuning/cal bench) counts as continuous activity so
+    // the machine is never cut mid-operation.
+    if (brewing_ || tuning_.active || cal_.active) {
+        lastActivityMs_ = nowMs;
+    }
+    if (heaterTimeoutMin_ <= 0.0f || !heaterEnabled_) {
+        return;  // feature disabled, or heater already off
+    }
+    const uint32_t timeoutMs = static_cast<uint32_t>(heaterTimeoutMin_ * 60000.0f);
+    if ((nowMs - lastActivityMs_) >= timeoutMs) {
+        setHeaterEnabled(false);
+        // setHeaterEnabled marks activity pending; clear it so the machine stays
+        // off until the operator explicitly re-enables the heater.
+        activityPending_ = false;
+    }
 }
 
 float TemperatureLoop::computeThermoblockSetpoint() const {
     const float hardCeil = profile_->thermal.maxSafeTempC - 5.0f;
+    // Manual override wins: hold the thermoblock at the absolute temperature the
+    // operator dialed in, regardless of the group setpoint or offset.
+    if (manualThermoblockActive_ && !std::isnan(manualThermoblockSetpoint_)) {
+        float target = manualThermoblockSetpoint_;
+        if (target > hardCeil) target = hardCeil;
+        if (target < 0.0f) target = 0.0f;
+        return target;
+    }
+    // Tier 2: the user setpoint is the group target, the thermoblock chases
+    // group + offset. Tier 1 (no group sensor): the setpoint IS the thermoblock
+    // target, so the offset does not apply.
     float target = setpoint_;
-    if (hasGroupSensor() && groupOk_) {
-        float comp = gain_ * (setpoint_ - groupTempC_);
-        if (comp < 0.0f) comp = 0.0f;  // never drive below the cup target
-        if (comp > profile_->thermal.maxCascadeOffsetC) {
-            comp = profile_->thermal.maxCascadeOffsetC;
-        }
-        target = setpoint_ + comp;
+    if (hasGroupSensor()) {
+        target += thermoblockOffsetC_;
     }
     if (target > hardCeil) target = hardCeil;
+    if (target < 0.0f) target = 0.0f;  // negative offsets can drop us here
     return target;
 }
 
@@ -234,6 +446,16 @@ void TemperatureLoop::runPidIfDue(uint32_t nowMs) {
 
     thermoblockSetpoint_ = computeThermoblockSetpoint();
     lastOutput_ = pid_.update(thermoblockSetpoint_, temp, dtSec);
+
+    // Shot heater boost: during the *main brew* phase only (preinfusionPhase_
+    // == 0, i.e. not the pre-infusion pulse or the bloom pause), drive the
+    // heater flat-out to counter the cold-water draw that otherwise sags the
+    // thermoblock through the second half of a shot. Capped at the brew target
+    // so we never push past it -- the PID resumes control once the block is at
+    // temperature, and the hard overtemp cut above still guards safety.
+    if (brewing_ && preinfusionPhase_ == 0 && temp < thermoblockSetpoint_) {
+        lastOutput_ = 1.0f;
+    }
 }
 
 void TemperatureLoop::startTuning(uint32_t nowMs,
@@ -461,7 +683,7 @@ void TemperatureLoop::updateSlowPwm(uint32_t nowMs) {
     }
     if (windowStartMs_ == 0 || (nowMs - windowStartMs_) >= window) {
         windowStartMs_ = nowMs;
-        if (faulted_) {
+        if (faulted_ || !heaterEnabled_) {
             windowOnTimeMs_ = 0;
         } else {
             float frac = lastOutput_;
@@ -470,7 +692,8 @@ void TemperatureLoop::updateSlowPwm(uint32_t nowMs) {
             windowOnTimeMs_ = static_cast<uint32_t>(frac * window);
         }
     }
-    const bool shouldBeOn = !faulted_ && (nowMs - windowStartMs_) < windowOnTimeMs_;
+    const bool shouldBeOn =
+        !faulted_ && heaterEnabled_ && (nowMs - windowStartMs_) < windowOnTimeMs_;
     profile_->heaterRelay->set(shouldBeOn);
 }
 
