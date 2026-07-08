@@ -28,6 +28,7 @@ const MachineProfile kStubProfile = {
             .pwmWindowMs = 1000,
             .defaultThermoblockOffsetC = 0.0f,
             .maxThermoblockOffsetC = 20.0f,
+            .approachDutyPerC = 0.0f,  // stub has no heater; taper disabled
         },
     .hydraulic =
         {
