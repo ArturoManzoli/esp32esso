@@ -79,8 +79,8 @@ void printBanner(const esp32esso::profile::MachineProfile& profile) {
     const auto& pins = esp32esso::board::activeBoard().pins;
     Serial.printf("sensors: thermoblock=TC CS GPIO %u, portafilter=TC CS GPIO %u "
                   "(SCK %u SO %u)\n",
-                  pins.thermocoupleCs,
-                  pins.thermocoupleCs2,
+                  pins.thermocoupleCs2,  // thermoblock amp (own CS, shared bus)
+                  pins.thermocoupleCs,   // portafilter/group amp (primary CS)
                   pins.thermocoupleSck,
                   pins.thermocoupleMiso);
 #endif

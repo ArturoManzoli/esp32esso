@@ -7,8 +7,9 @@ namespace esp32esso::board {
 // ESP32-S3-DevKitC-1. More flash/PSRAM and CPU headroom than the WROOM, so
 // this is the board Tier 2-4 (BLE, pressure/flow profiling, OTA) are
 // validated against. Thermocouple amps are read-only so no MOSI is wired.
-// Tier 2 adds a second CS (GPIO 11) for the group sensor, a brew-switch
-// brew SSR (GPIO 5), and a relief-valve output (GPIO 14).
+// Tier 2 (dual-TC) adds a second thermocouple CS (GPIO 11) for the thermoblock
+// amp -- the group amp stays on the Tier 1 CS (GPIO 10) -- plus a brew-switch
+// brew SSR (GPIO 5) and a relief-valve output (GPIO 14).
 const BoardConfig& activeBoard() {
     static const BoardConfig kBoard = {
         .info =

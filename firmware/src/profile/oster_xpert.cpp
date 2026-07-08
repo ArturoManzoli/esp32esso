@@ -31,12 +31,13 @@ using ThermocoupleSensor = hal::Max31855Sensor;
 #endif
 
 // Thermoblock sensor. The default (and recommended) build puts a thermocouple
-// here -- identical to the group probe -- read on the Tier 1 CS pin. Two
-// matched thermocouples give a linear, cold-junction-compensated reading with
-// no per-unit resistance fit and far less drift than the stock thermistor, so
-// prefer this unless you specifically want to reuse the machine's NTC.
-// Defining ESP32ESSO_THERMOBLOCK_NTC (the `-ntc` build) swaps in the stock
-// 100k NTC instead; that path is kept so people can opt for either sensor.
+// here -- identical to the group probe -- on its own CS (thermocoupleCs2),
+// sharing the group amp's SCK/SO bus. Two matched thermocouples give a linear,
+// cold-junction-compensated reading with no per-unit resistance fit and far
+// less drift than the stock thermistor, so prefer this unless you specifically
+// want to reuse the machine's NTC. Defining ESP32ESSO_THERMOBLOCK_NTC (the
+// `-ntc` build) swaps in the stock 100k NTC instead; that path is kept so
+// people can opt for either sensor.
 #if defined(ESP32ESSO_THERMOBLOCK_NTC)
 // Stock 100k NTC on the thermoblock via a 3V3 → 100k → ADC → NTC → GND divider.
 // R0 trimmed on the prototype against the portafilter K-type on the same block
@@ -51,7 +52,7 @@ constexpr hal::NtcCalibration kThermoblockNtcCal{
 };
 hal::NtcThermistorSensor g_brewTempSensor(kPins.thermoblockNtc, kThermoblockNtcCal);
 #else
-ThermocoupleSensor g_brewTempSensor(kPins.thermocoupleCs,
+ThermocoupleSensor g_brewTempSensor(kPins.thermocoupleCs2,
                                     kPins.thermocoupleSck,
                                     kPins.thermocoupleMiso);
 #endif
@@ -59,20 +60,14 @@ ThermocoupleSensor g_brewTempSensor(kPins.thermocoupleCs,
 hal::GpioDiscreteOutput g_heaterRelay(kPins.heaterSsr, /*activeHigh=*/true);
 
 #if defined(ESP32ESSO_TIER2)
-// Tier 2: thermocouple at the portafilter/group, sharing the SPI bus with the
-// thermoblock amp (only CS differs). In the recommended dual-thermocouple build
-// the thermoblock amp keeps the Tier 1 CS pin (GPIO 21) and the group amp lands
-// on CS2 (GPIO 22). In the NTC build there is no thermoblock amp, so the single
-// group amp stays on the Tier 1 CS pin (GPIO 21) and CS2 is unused.
-#if defined(ESP32ESSO_THERMOBLOCK_NTC)
+// Tier 2: thermocouple at the portafilter/group on the primary CS
+// (thermocoupleCs, GPIO 21 on WROOM), in both the dual-TC and NTC builds. In
+// the recommended dual-TC build the thermoblock amp shares this same SCK/SO bus
+// on its own CS (thermocoupleCs2, GPIO 5 on WROOM); in the NTC build there is
+// no thermoblock amp and thermocoupleCs2 is unused.
 ThermocoupleSensor g_groupTempSensor(kPins.thermocoupleCs,
                                      kPins.thermocoupleSck,
                                      kPins.thermocoupleMiso);
-#else
-ThermocoupleSensor g_groupTempSensor(kPins.thermocoupleCs2,
-                                     kPins.thermocoupleSck,
-                                     kPins.thermocoupleMiso);
-#endif
 // Brew pump/valve SSR; activeLow matches common 5 V dual-channel SSR boards.
 hal::GpioDiscreteOutput g_brewRelay(kPins.brewSsr, /*activeHigh=*/false);
 // Relief valve SSR; activeLow matches common 5 V dual-channel SSR boards.

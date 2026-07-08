@@ -29,27 +29,38 @@ The detailed wiring change is documented in
 
 ## Tier 2 - Group-referenced temperature
 
-Reuses the machine's **stock NTC thermistor** on the thermoblock (inner/safety
-loop, via an ADC divider) and moves the **thermocouple to the portafilter/group**
-so the setpoint targets the cup temperature while the thermoblock is driven
-hotter to overcome the transport loss. Optionally taps the brew switch for the
-auto shot timer.
+Adds a **thermocouple at the portafilter/group** so the setpoint targets the cup
+temperature while the thermoblock is driven hotter to overcome the transport
+loss. The thermoblock keeps its own inner/safety probe, provided two ways — the
+recommended one being a second thermocouple. Optionally taps the brew switch for
+the auto shot timer.
+
+- **Recommended (default `esp32-oster-xpert` / `esp32-s3-oster-xpert`):** a
+  **second thermocouple identical to the group one** on the thermoblock. The
+  group amp stays on the primary `CS` (GPIO 21 WROOM / GPIO 10 S3) and the new
+  thermoblock amp shares the same `SCK`/`SO` bus on its own `CS2` (GPIO 5 WROOM /
+  GPIO 11 S3). Linear, cold-junction-compensated, no calibration soak, less drift.
+- **Alternative (`-ntc` build):** reuse the machine's **stock NTC thermistor** on
+  the thermoblock via an ADC divider, keeping the single group thermocouple on the
+  primary `CS`. Saves an amp/probe at the cost of calibration and drift.
 
 ### BOM (machine-specific additions)
 
 | Qty | Part | Notes |
 | --- | ---- | ----- |
-| 1 | 100 kΩ 1 % resistor | Series pull-up for the stock-NTC ADC divider (`3V3 → R → ADC → NTC → GND`) |
-| 1 | 10-100 nF ceramic cap (optional) | ADC-node-to-GND noise filter for the NTC line |
-| 1 | Thermocouple amp at the group (MAX6675 on WROOM / MAX31855 on S3) | On the shared SPI bus, on `CS2`; the Tier 1 amp is freed since the thermoblock now uses the NTC |
+| 1 | Thermocouple amp at the group (MAX6675 on WROOM / MAX31855 on S3) | On the shared SPI bus, primary `CS` (GPIO 21 WROOM / GPIO 10 S3) in both builds |
 | 1 | K-type thermocouple, mineral-insulated | Mounted at the portafilter adapter / group outlet |
 | 1 | Stainless hose clamp / bracket | Secures the group probe |
+| 1 | Second thermocouple amp + K-type probe (**recommended dual-TC build**) | Same type as the group amp; reads the thermoblock on `CS2` (GPIO 5 WROOM / GPIO 11 S3), shared bus |
+| 1 | 100 kΩ 1 % resistor (**`-ntc` build only**) | Series pull-up for the stock-NTC ADC divider (`3V3 → R → ADC → NTC → GND`) |
+| 1 | 10-100 nF ceramic cap (**`-ntc` build**, optional) | ADC-node-to-GND noise filter for the NTC line |
 | ~ | Optocoupler or low-current relay (optional) | Isolates the brew-switch sense from mains for the auto shot timer |
 | 1 | Ratiometric pressure transducer, 0–12 bar, G1/8" (optional) | Brew-line pressure; needs a 10 kΩ/20 kΩ divider into an ADC pin (Tier 3-ready) |
 | 2 | 10 kΩ + 20 kΩ 1 % resistors (optional) | 2:1 divider scaling the transducer's 0.5–4.5 V output to the 3.3 V ADC |
 
-The stock 100 kΩ NTC (Beta averaged to 3962.5 K) is reused as-is; how to
-calibrate it (fixed-point and common-heater methods, with results) is in
+The recommended dual-thermocouple build needs no sensor calibration. For the
+`-ntc` build, the stock 100 kΩ NTC (Beta averaged to 3962.5 K) is reused as-is;
+how to calibrate it (fixed-point and common-heater methods, with results) is in
 [`tier-2-calibration.md`](tier-2-calibration.md).
 
 ### Wiring

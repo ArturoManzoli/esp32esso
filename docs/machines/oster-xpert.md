@@ -95,12 +95,12 @@ tap auto-starts the shot timer (a manual button in the app works without it).
 There are two ways to read the thermoblock, and the build env picks which:
 
 - **Two thermocouples (default, `esp32-oster-xpert` / `esp32-s3-oster-xpert`).**
-  Add a **second thermocouple identical to the group one** on the thermoblock —
-  the same amp and probe you already used for Tier 1, now joined by a matching
-  amp for the group. This is the **recommended** setup: the reading is linear and
+  Add a **second thermocouple identical to the group one** on the thermoblock.
+  This is the **recommended** setup: the reading is linear and
   cold-junction-compensated, needs no per-unit resistance fit or calibration
-  soak, and drifts far less than a thermistor. Wiring is just "Tier 1 + a second
-  amp for the group" (thermoblock amp on `CS`, group amp on `CS2`).
+  soak, and drifts far less than a thermistor. The group amp stays on the primary
+  `CS` (GPIO 21 on WROOM, GPIO 10 on S3); the new thermoblock amp shares the same
+  `SCK`/`SO` bus on its own `CS2` (GPIO 5 on WROOM, GPIO 11 on S3).
 - **Stock NTC thermistor (alternative, `esp32-oster-xpert-ntc` /
   `esp32-s3-oster-xpert-ntc`).** Reuse the machine's stock 100 kΩ NTC on the
   thermoblock via an ADC divider and keep the single group thermocouple on `CS`.
