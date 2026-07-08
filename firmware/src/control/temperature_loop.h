@@ -114,9 +114,11 @@ public:
     float preinfusionSeconds() const { return preinfusionSec_; }
     uint8_t preinfusionPhase() const { return preinfusionPhase_; }
 
-    // Relief/3-way vent valve. Held open (vent to drip tray) whenever a shot is
-    // NOT running, and closed at the instant a shot starts so the pump can build
-    // pressure; it reopens when the shot ends and stays open through idle. The
+    // Relief/3-way vent valve. Default CLOSED (de-energised): it energises open
+    // only for a brief vent pulse (kPostShotVentMs) right after a shot ends, to
+    // relieve puck/line pressure. It stays closed at idle, while the block is
+    // hot, during a shot or flush, and during future active operations (steam,
+    // hot-water) -- so the solenoid is not held energised humming at idle. The
     // de-energised state (boot/reset) is closed, matching an NC valve's
     // fail-safe. Only driven when the profile binds a solenoidValve output.
     bool reliefValveOpen() const { return reliefValveOpen_; }
@@ -182,7 +184,7 @@ private:
     void updatePreinfusion(uint32_t nowMs);
     void updateFlush(uint32_t nowMs);
     void updateBrewRelay();
-    void updateReliefValve();
+    void updateReliefValve(uint32_t nowMs);
     void updatePressure();
     void updateHeaterTimeout(uint32_t nowMs);
     float computeThermoblockSetpoint() const;
@@ -237,8 +239,10 @@ private:
     bool flushing_ = false;
     uint32_t flushUntilMs_ = 0;
 
-    // Relief/3-way vent valve state (see reliefValveOpen())
+    // Relief/3-way vent valve state (see reliefValveOpen()). reliefVentUntilMs_
+    // is the wrap-safe deadline of the post-shot vent pulse; 0 means closed.
     bool reliefValveOpen_ = false;
+    uint32_t reliefVentUntilMs_ = 0;
 
     // Brew-line pressure, filtered (see pressureBar())
     float pressureBar_ = NAN;

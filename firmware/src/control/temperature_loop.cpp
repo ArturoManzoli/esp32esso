@@ -10,6 +10,7 @@ namespace {
 constexpr uint32_t kPidPeriodMs = 200;  // 5 Hz; thermocouple settles slowly
 constexpr float kMaxBrewSetpointC = 110.0f;  // brew target never needs to exceed this
 constexpr uint32_t kFlushDurationMs = 3000;  // grouphead flush pulse length
+constexpr uint32_t kPostShotVentMs = 4000;   // relief-valve vent pulse after a shot
 
 // Adaptive EMA for the brew-line pressure. The vibration pump injects ~50/60 Hz
 // ripple (and the occasional spike); the sensor's per-read median already kills
@@ -71,6 +72,7 @@ void TemperatureLoop::begin(const profile::MachineProfile& profile) {
     flushing_ = false;
     flushUntilMs_ = 0;
     reliefValveOpen_ = false;
+    reliefVentUntilMs_ = 0;
     pressureBar_ = NAN;
     pressureOk_ = false;
     lastPidMs_ = 0;
@@ -98,7 +100,7 @@ void TemperatureLoop::tick(uint32_t nowMs) {
     updatePreinfusion(nowMs);
     updateFlush(nowMs);
     updateBrewRelay();
-    updateReliefValve();
+    updateReliefValve(nowMs);
     updatePressure();
     updateHeaterTimeout(nowMs);
     if (cal_.active) {
@@ -242,6 +244,9 @@ void TemperatureLoop::updateBrewState(uint32_t nowMs) {
         brewing_ = false;
         brewSource_ = 0;
         preinfusionPhase_ = 0;
+        // Arm the post-shot vent: the relief valve opens briefly now that the
+        // shot has ended, to relieve puck/line pressure (see updateReliefValve).
+        reliefVentUntilMs_ = nowMs + kPostShotVentMs;
     }
 }
 
@@ -273,15 +278,27 @@ void TemperatureLoop::updateBrewRelay() {
     profile_->brewRelay->set(pumpOn);
 }
 
-void TemperatureLoop::updateReliefValve() {
+void TemperatureLoop::updateReliefValve(uint32_t nowMs) {
     if (profile_ == nullptr || profile_->solenoidValve == nullptr) {
         return;
     }
-    // 3-way-style vent: open (relieve to the drip tray) whenever the machine is
-    // idle, and closed while a shot or grouphead flush is running so the pump
-    // can push water through the grouphead. Commutes closed the instant a shot
-    // starts or a flush begins, reopens the instant both end.
-    reliefValveOpen_ = !brewing_ && !flushing_;
+    // 3-way-style vent, DEFAULT CLOSED (de-energised). The valve energises open
+    // only for a brief post-shot vent pulse to relieve puck/line pressure; the
+    // rest of the time -- idle, a hot block, a running shot or flush, and future
+    // active operations (steam, hot-water) -- it stays closed. Holding it closed
+    // at idle stops the solenoid humming (it used to sit energised open whenever
+    // the machine was idle). A new shot or flush claims the valve and cancels any
+    // pending vent so the pump can build pressure through the grouphead.
+    if (brewing_ || flushing_) {
+        reliefVentUntilMs_ = 0;
+    }
+    const bool venting =
+        reliefVentUntilMs_ != 0 &&
+        static_cast<int32_t>(reliefVentUntilMs_ - nowMs) > 0;
+    if (!venting) {
+        reliefVentUntilMs_ = 0;  // window elapsed; return to the closed default
+    }
+    reliefValveOpen_ = venting;
     profile_->solenoidValve->set(reliefValveOpen_);
 }
 
