@@ -5,9 +5,10 @@ optional brew-line **pressure transducer** and a **brew-switch tap** for the
 auto shot timer:
 
 - **Thermoblock:** **recommended — a second thermocouple identical to the group
-  one** on the thermoblock (same amp + probe as Tier 1). The alternative is the
-  machine's **stock NTC thermistor** read through a resistor divider on an ADC pin
-  (the `-ntc` build). Two thermocouples is the better sensor — see
+  one** on the thermoblock (its own amp on a separate `CS`, sharing the group
+  amp's SCK/SO bus). The alternative is the machine's **stock NTC thermistor**
+  read through a resistor divider on an ADC pin (the `-ntc` build). Two
+  thermocouples is the better sensor — see
   [Thermoblock sensor](#thermoblock-sensor-two-thermocouples-recommended-or-the-stock-ntc).
 - **Group/portafilter:** a **thermocouple** at the water exit over the
   portafilter adapter.
@@ -24,11 +25,13 @@ common-heater methods, with results) lives in its own doc:
 
 > [!NOTE]
 > The default `esp32-oster-xpert` / `esp32-s3-oster-xpert` envs build with **two
-> thermocouples** (thermoblock TC on `CS`, group TC on `CS2`) — the recommended
-> setup. The `esp32-oster-xpert-ntc` / `esp32-s3-oster-xpert-ntc` envs build with
+> thermocouples** — the **group** amp on the primary `CS` (GPIO 21 on WROOM,
+> GPIO 10 on S3) and the **thermoblock** amp on its own `CS2` (GPIO 5 on WROOM,
+> GPIO 11 on S3), sharing `SCK`/`SO` — the recommended setup. The
+> `esp32-oster-xpert-ntc` / `esp32-s3-oster-xpert-ntc` envs build with
 > `ESP32ESSO_THERMOBLOCK_NTC=1` instead, reading the **thermoblock from the stock
-> NTC** and keeping the single group thermocouple on `CS`. Pick the env that
-> matches how you wired the thermoblock.
+> NTC** while the group thermocouple stays on `CS` and `CS2` is unused. Pick the
+> env that matches how you wired the thermoblock.
 
 > [!WARNING]
 > Same mains-safety rules as Tier 1 apply. Disconnect from the wall and verify
@@ -53,18 +56,20 @@ your setpoint. See the cascade math in
 | ------ | --------------------------------- | --------------------------------- |
 | Amp `SCK` (shared bus) | GPIO 18 | GPIO 12 |
 | Amp `SO` / `MISO` (shared bus) | GPIO 19 | GPIO 13 |
-| Thermoblock amp `CS` (dual-TC, default) | GPIO 21 (Tier 1 pin) | GPIO 10 (Tier 1 pin) |
-| Group amp `CS2` (dual-TC, default) | GPIO 22 | GPIO 11 |
-| Group amp `CS` (`-ntc` build) | GPIO 21 (Tier 1 pin) | GPIO 10 (Tier 1 pin) |
+| Group amp `CS` (both builds) | GPIO 21 (Tier 1 pin) | GPIO 10 (Tier 1 pin) |
+| Thermoblock amp `CS2` (dual-TC, default) | GPIO 5 | GPIO 11 |
 | NTC divider node (ADC, `-ntc` build) | GPIO 34 (ADC1_CH6, input-only) | GPIO 7 (ADC1_CH6) |
 | Heater SSR | GPIO **23** (D23) | GPIO 4 |
 | Brew SSR (pump/valve) | GPIO 27 | GPIO 5 |
 | Relief-valve SSR (optional) | GPIO 26 | GPIO 14 |
 | Pressure divider node (ADC, optional) | GPIO 35 (ADC1_CH7, input-only) | GPIO 8 (ADC1_CH7) |
 
-In the default dual-thermocouple build the thermoblock amp keeps the Tier 1 `CS`
-pin and the group amp is added on `CS2`. In the `-ntc` build there is no
-thermoblock amp, so the single group amp sits on `CS` and `CS2` is unused.
+The **group** amp sits on the primary `CS` (GPIO 21 / GPIO 10) in both builds.
+The default dual-thermocouple build adds the **thermoblock** amp on its own `CS2`
+(GPIO 5 on WROOM, GPIO 11 on S3), sharing `SCK`/`SO`. GPIO 5 is a boot-strapping
+pin but is safe as a CS here — it only has to idle high, which is its reset
+default. In the `-ntc` build the thermoblock is read from the NTC and `CS2` is
+unused.
 
 Use **ADC1** channels only for the analog sensors — ADC2 is unavailable while
 the BLE radio is on. Tie all sensor grounds to the ESP32 `GND`.
@@ -89,18 +94,18 @@ Why prefer it over the stock NTC:
 - **Fault flags** (open/short on MAX31855; empty-bus detection on MAX6675)
   instead of a divider voltage you have to sanity-check.
 
-Wiring: clamp a K-type probe to the **thermoblock** (as in
-[Tier 1](tier-1-wiring.md)), wire its amp `VCC`/`GND` to `3V3`/`GND` and
-`SCK`/`SO` to the shared bus, and put its `CS` on the **Tier 1 pin** (GPIO 21 on
-WROOM, GPIO 10 on S3). The group amp then takes **`CS2`** (see
-[Group thermocouple](#group-thermocouple)). Both amps must be the **same type**
-(two MAX6675 on WROOM, two MAX31855 on S3), sharing `SCK`/`SO` with only `CS`
-per-device.
+Wiring: the **group** amp keeps the primary `CS` (GPIO 21 on WROOM, GPIO 10 on
+S3, see [Group thermocouple](#group-thermocouple)); clamp the **thermoblock**
+amp's K-type probe to the thermoblock (as in [Tier 1](tier-1-wiring.md)), wire
+its `VCC`/`GND` to `3V3`/`GND` and `SCK`/`SO` to the shared bus, and put its `CS`
+on **`CS2`** (GPIO 5 on WROOM, GPIO 11 on S3). Both amps must be the **same
+type** (two MAX6675 on WROOM, two MAX31855 on S3), sharing `SCK`/`SO` with only
+`CS` per-device.
 
 > [!TIP]
-> If you already ran Tier 1, the thermoblock amp is done — upgrading to Tier 2 is
-> literally "add the second amp on `CS2` and clamp its probe at the group." No NTC
-> divider, no calibration soak.
+> Adding the thermoblock thermocouple is just one extra amp on the shared bus:
+> tie its `SCK`/`SO` to the group amp's pins and run a single new `CS` wire to
+> `CS2` (GPIO 5 on WROOM). No NTC divider, no calibration soak.
 
 ### Thermoblock NTC (stock sensor, `-ntc` build)
 
@@ -147,21 +152,17 @@ reading into accurate °C, and for the open/short fault behaviour.
 
 ## Group thermocouple
 
-A thermocouple at the group reads the water at the puck. Which `CS` pin it uses
-depends on the build:
-
-- **Default dual-thermocouple build:** the thermoblock amp occupies the Tier 1
-  `CS` pin, so the group amp is the **second amp on `CS2`** (GPIO 22 on WROOM,
-  GPIO 11 on S3), sharing `SCK`/`SO` with the thermoblock amp.
-- **`-ntc` build:** there is no thermoblock amp, so the single group amp keeps the
-  **Tier 1 `CS` pin** (GPIO 21 on WROOM, GPIO 10 on S3) and `CS2` is unused.
+A thermocouple at the group reads the water at the puck. It uses the **primary
+`CS`** (GPIO 21 on WROOM, GPIO 10 on S3) in **both** builds — only the thermoblock
+sensor changes between the dual-TC and `-ntc` builds (the dual-TC build adds the
+thermoblock amp on `CS2`, sharing this bus).
 
 1. Mount the K-type probe against the **portafilter adapter / group outlet**, as
    close to where the water exits over the puck as you can clamp it. Insulate the
    bead from ambient airflow so it reads water temperature, not case air.
 2. Wire the amp's `VCC`/`GND` to the ESP32 `3V3`/`GND` (**use `3V3`, not `5V`**),
-   `SCK`/`SO` to the shared-bus GPIOs above, and `CS` to **`CS2`** in the default
-   build (**`CS`** in the `-ntc` build).
+   `SCK`/`SO` to the shared-bus GPIOs above, and `CS` to the **primary `CS`**
+   (GPIO 21 / GPIO 10).
 3. If the group amp is missing or faults, the firmware degrades to single-sensor
    behaviour (controls the thermoblock at the setpoint directly) and the app
    shows "group sensor offline".

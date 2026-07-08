@@ -24,9 +24,15 @@ ESP32-S3.
 | Env | Board | Purpose |
 | --- | ----- | --- |
 | `esp32-dev` | ESP32-WROOM | Stub profile, no hardware. Default env; CI + board bring-up. |
-| `esp32-oster-xpert` | ESP32-WROOM | Oster Xpert on a classic ESP32 (primary target). |
+| `esp32-oster-xpert` | ESP32-WROOM | Oster Xpert on a classic ESP32 (primary target). Dual thermocouples (recommended). |
+| `esp32-oster-xpert-ntc` | ESP32-WROOM | Same, but reuses the stock NTC thermistor on the thermoblock. |
 | `esp32-s3-dev` | ESP32-S3 | Stub profile on the S3. |
-| `esp32-s3-oster-xpert` | ESP32-S3 | Oster Xpert on the S3 (recommended for Tier 2-4). |
+| `esp32-s3-oster-xpert` | ESP32-S3 | Oster Xpert on the S3 (recommended for Tier 2-4). Dual thermocouples (recommended). |
+| `esp32-s3-oster-xpert-ntc` | ESP32-S3 | Same, but reuses the stock NTC thermistor on the thermoblock. |
+
+The Oster envs default to two thermocouples (group on the primary CS, thermoblock
+on `CS2`); the `*-ntc` variants reuse the machine's stock NTC on the thermoblock
+instead. The thermocouple pair is more accurate and drift-free.
 
 Tier 1 BLE (live state + setpoint) is enabled on the `*-oster-xpert` envs.
 See [`protocol/ble/tier1.md`](../protocol/ble/tier1.md).

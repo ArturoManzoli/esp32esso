@@ -8,20 +8,21 @@ namespace esp32esso::board {
 // numbers differ per dev board (classic ESP32 cannot reuse the S3 pins, since
 // GPIO 6-11 back the module flash and a few pins are boot-strapping).
 //
-// Tier 1 uses a single thermocouple on the thermoblock. Tier 2 (recommended)
-// adds a second, identical thermocouple at the portafilter/group
-// (`thermocoupleCs2`, sharing the same SCK/SO bus) plus an optional brew SSR
-// output (`brewSsr`) for pump/valve control from the app. `thermoblockNtc` is
-// an ADC1 channel for the alternative build that reuses a stock NTC thermistor
-// on the thermoblock instead of a thermocouple (see ESP32ESSO_THERMOBLOCK_NTC);
-// the dual-thermocouple setup is preferred (linear, cold-junction-compensated,
-// less drift). Solenoid, pressure-transducer and pump-dimmer pins land with
-// their tiers.
+// `thermocoupleCs` is the primary amp CS: the thermoblock probe in Tier 1, and
+// the group/portafilter probe in a Tier 2 dual-thermocouple build. Tier 2
+// (recommended) adds a second, identical thermocouple for the thermoblock on
+// `thermocoupleCs2`, sharing the same SCK/SO bus (only CS differs), plus an
+// optional brew SSR output (`brewSsr`) for pump/valve control from the app.
+// `thermoblockNtc` is an ADC1 channel for the alternative build that reuses a
+// stock NTC thermistor on the thermoblock instead of a thermocouple (see
+// ESP32ESSO_THERMOBLOCK_NTC); the dual-thermocouple setup is preferred (linear,
+// cold-junction-compensated, less drift). Solenoid, pressure-transducer and
+// pump-dimmer pins land with their tiers.
 struct BoardPins {
     uint8_t thermocoupleCs;
     uint8_t thermocoupleSck;
     uint8_t thermocoupleMiso;
-    uint8_t thermocoupleCs2;  // Tier 2 group/portafilter sensor (shared bus)
+    uint8_t thermocoupleCs2;  // dual-TC thermoblock amp CS (shared bus); unused in -ntc build
     uint8_t thermoblockNtc;   // ADC1 pin for the stock NTC thermistor option
     uint8_t heaterSsr;
     uint8_t brewSsr;  // Tier 2 brew pump/valve SSR (app start/stop shot)
