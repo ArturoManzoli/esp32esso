@@ -109,6 +109,11 @@ const MachineProfile kOsterXpertProfile = {
             // when the user pushes the offset to the extreme.
             .defaultThermoblockOffsetC = 8.0f,
             .maxThermoblockOffsetC = 20.0f,
+            // Full duty only allowed >20 C below the setpoint; the drive tapers
+            // to zero at the target so the low-mass block eases in rather than
+            // coasting ~30 C past it. Tuned on the bench against the step
+            // response; see docs/machines/oster-xpert.md.
+            .approachDutyPerC = 0.05f,
         },
     .hydraulic =
         {

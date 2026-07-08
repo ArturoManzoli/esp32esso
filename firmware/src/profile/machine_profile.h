@@ -40,6 +40,15 @@ struct ThermalConfig {
     // phone slider on first boot; the value persists in NVS thereafter.
     float defaultThermoblockOffsetC;
     float maxThermoblockOffsetC;
+
+    // Soft-landing approach taper. The heater duty is ceilinged at
+    // approachDutyPerC * (setpoint - measured) so the loop eases off well before
+    // the setpoint instead of holding full power right up to it. The thermoblock
+    // stores enough heat that a full-power approach coasts far past the target
+    // (the aluminium block + cartridge stay hotter than the probe reads on the
+    // way up), so capping the drive within the last few degrees keeps that
+    // stored-heat gradient -- and thus the coast -- small. 0 disables the taper.
+    float approachDutyPerC;
 };
 
 // Wet-side properties. Mostly informational for the user, but a few fields

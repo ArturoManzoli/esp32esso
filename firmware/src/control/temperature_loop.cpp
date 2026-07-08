@@ -445,7 +445,26 @@ void TemperatureLoop::runPidIfDue(uint32_t nowMs) {
     }
 
     thermoblockSetpoint_ = computeThermoblockSetpoint();
-    lastOutput_ = pid_.update(thermoblockSetpoint_, temp, dtSec);
+
+    // Freeze the integrator while the heater is disabled so a term is not
+    // accumulated during standby and dumped the instant it is re-enabled.
+    pid_.setIntegratorEnabled(heaterEnabled_);
+    float output = pid_.update(thermoblockSetpoint_, temp, dtSec);
+
+    // Soft-landing approach taper: ceiling the duty as a function of how far
+    // below the setpoint we still are, so the loop eases off instead of holding
+    // full power right up to the target. Without this the low-mass block coasts
+    // tens of degrees past the setpoint (the cartridge stays hotter than the
+    // probe reads on the way up); capping the drive within the final degrees
+    // keeps that gradient -- and the overshoot -- small.
+    const float slope = profile_->thermal.approachDutyPerC;
+    if (slope > 0.0f) {
+        float cap = slope * (thermoblockSetpoint_ - temp);
+        if (cap < 0.0f) cap = 0.0f;
+        if (cap > 1.0f) cap = 1.0f;
+        if (output > cap) output = cap;
+    }
+    lastOutput_ = output;
 
     // Shot heater boost: during the *main brew* phase only (preinfusionPhase_
     // == 0, i.e. not the pre-infusion pulse or the bloom pause), drive the
