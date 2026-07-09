@@ -5,6 +5,9 @@ live telemetry, tune the brew, time shots, and edit machine settings — no WiFi
 
 The GATT contract lives in [`../protocol/ble/tier2.md`](../protocol/ble/tier2.md).
 
+<img width="2560" height="1600" alt="Screenshot_20260709-150936" src="https://github.com/user-attachments/assets/5eb403be-af7c-4668-9949-58a8f6d9fedf" />
+
+
 ## Requirements
 
 - Android 8.0+ (API 26) phone or tablet with BLE
@@ -52,3 +55,9 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 Dark theme with an orange accent and frosted-glass surfaces. Pressure/flow
 profiling and OTA arrive in later stages.
+
+## Screenshots
+
+<img width="2560" height="1600" alt="Screenshot_20260709-151016" src="https://github.com/user-attachments/assets/733e8b61-f37a-4108-93d1-0085038971f8" />
+<img width="2560" height="1600" alt="Screenshot_20260709-151003" src="https://github.com/user-attachments/assets/8a141e5b-6124-4494-83d9-8a003ac948a8" />
+
