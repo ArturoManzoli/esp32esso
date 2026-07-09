@@ -124,6 +124,10 @@ The Tier 1 Android companion app lives under [`app-android/`](app-android/).
 Build and install it from Android Studio (see [`app-android/README.md`](app-android/README.md)),
 then connect over BLE to set the brew temperature and watch live heater state.
 
+## Screenshots
+
+<img width="2560" height="1600" alt="Screenshot_20260709-150936" src="https://github.com/user-attachments/assets/5eb403be-af7c-4668-9949-58a8f6d9fedf" />
+
 ## Contributing
 
 Issues, hardware reports for new machines, and pull requests are welcome.
