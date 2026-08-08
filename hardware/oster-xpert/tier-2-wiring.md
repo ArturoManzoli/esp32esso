@@ -60,7 +60,9 @@ your setpoint. See the cascade math in
 | Thermoblock amp `CS2` (dual-TC, default) | GPIO 5 | GPIO 11 |
 | NTC divider node (ADC, `-ntc` build) | GPIO 34 (ADC1_CH6, input-only) | GPIO 7 (ADC1_CH6) |
 | Heater SSR | GPIO **23** (D23) | GPIO 4 |
-| Brew SSR (pump/valve) | GPIO 27 | GPIO 5 |
+| Pump dimmer DIM (gate) | GPIO 32 | GPIO 6 |
+| Pump dimmer Z-C (zero-cross) | GPIO 33 | GPIO 9 |
+| Brew-valve SSR (valve alone) | GPIO 27 | GPIO 5 |
 | Relief-valve SSR (optional) | GPIO 26 | GPIO 14 |
 | Pressure divider node (ADC, optional) | GPIO 35 (ADC1_CH7, input-only) | GPIO 8 (ADC1_CH7) |
 
@@ -248,20 +250,37 @@ sensor OUT ──[ 10 kΩ 1% ]──┬── ADC pin (GPIO 35 / GPIO 8)
   Honeywell/TE part) skips the divider and ADC noise entirely, at higher cost
   and a different driver — wire it to the I²C pins instead of an ADC channel.
 
-## Brew SSR (pump + valve, app-controlled)
+## Pump dimmer + brew-valve SSR (app-controlled, two independent channels)
 
-The **Start shot** / **Stop shot** buttons in the app drive a brew SSR on
-**GPIO 27** (WROOM) / **GPIO 5** (S3). While a shot is running, the firmware
-holds the SSR **on** (pump + brew valve energized); when you stop the shot, the
-SSR turns off and the relief-valve pulse fires (see below).
+The **Start shot** / **Stop shot** buttons in the app drive two separate
+actuators: a **Standard AC phase-dimmer** on the vibration pump (DIM + Z-C)
+and a **brew-valve SSR** (GPIO 27 WROOM / GPIO 5 S3). While a shot is running
+the firmware holds the brew-valve SSR **on** plainly (no PWM: chopping a
+solenoid would chatter/buzz it) and sets the pump dimmer's conduction angle
+from the soft-start ramp / brew profile (see
+[`setPumpRampSeconds`](../../protocol/ble/tier2.md) and `BrewProfile`).
+Stopping the shot drops both, and the relief-valve pulse fires (see below).
 
-Wire the SSR module's **IN** for this channel to the brew GPIO and **GND** (same
-5 V dual-channel boards as the relief SSR are usually **active LOW**: 0 V = ON).
-The **AC load side** follows the same L/load/SSR/N pattern as the relief valve
-(one valve leg on **L**, SSR **AC2** on the other leg, SSR **AC1** on **N**).
+| Dimmer pin | ESP32-WROOM | ESP32-S3 | Notes |
+| ---------- | ----------- | -------- | ----- |
+| `VCC` | 3V3 | 3V3 | Prefer 3.3 V so Z-C is ESP-safe |
+| `GND` | GND | GND | Digital ground only (not AC N) |
+| `DIM` | GPIO 32 | GPIO 6 | Gate pulse out |
+| `Z-C` | GPIO 33 | GPIO 9 | Zero-cross in (interrupt) |
+
+On the AC side the dimmer needs **L**, **N**, and **OUT** (to the pump hot).
+Unlike a series SSR, **N must be connected** for zero-cross detection. The brew
+valve keeps its own SSR: **IN** to its GPIO above and **GND** (common 5 V
+dual-channel boards are usually **active LOW**: 0 V = ON), AC load side as
+before (one leg on **L**, SSR between load and **N**).
 
 The stock front-panel brew switch is **not** read by the firmware on this build;
 brewing is app-only unless you add a separate input later.
+
+> [!NOTE]
+> This is the **Standard** (Z-C + DIM) dimmer variant, not DimmerLink
+> (UART/I2C). Older Tier 2 builds used a zero-cross pump SSR on GPIO 32 alone;
+> that pin is now the DIM output and needs the extra Z-C wire on GPIO 33.
 
 ## Pressure-relief valve (optional, 3-way-style vent)
 

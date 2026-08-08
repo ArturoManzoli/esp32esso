@@ -119,7 +119,7 @@ void emitTelemetry(uint32_t nowMs) {
     Serial.printf(
         "{\"t\":%lu,\"tb\":%.2f,\"grp\":%.2f,\"sp\":%.2f,\"tb_sp\":%.2f,\"tb_off\":%.1f,"
         "\"out\":%.3f,\"heat\":%d,\"heat_en\":%d,\"brew\":%d,\"shot_ms\":%lu,\"relief\":%d,"
-        "\"flush\":%d,\"flush_ms\":%lu,"
+        "\"flush\":%d,\"flush_ms\":%lu,\"pump\":%.2f,"
         "\"bar\":%.2f,\"fault\":\"%s\",\"tune\":%d}\n",
         static_cast<unsigned long>(nowMs),
         std::isnan(tb) ? 0.0f : tb,
@@ -135,6 +135,7 @@ void emitTelemetry(uint32_t nowMs) {
         g_tempLoop.reliefValveOpen() ? 1 : 0,
         g_tempLoop.flushing() ? 1 : 0,
         static_cast<unsigned long>(g_tempLoop.flushRemainingMs(nowMs)),
+        g_tempLoop.pumpBenchDuty(),
         std::isnan(press) ? 0.0f : press,
         fault ? fault : "",
         tune);
@@ -149,6 +150,7 @@ void printHelp() {
     Serial.println(F("#   stop | q                  -> stop calibration/tuning"));
     Serial.println(F("#   heater on|off             -> master heater enable"));
     Serial.println(F("#   heat <duty%> <s> <abortC> -> open-loop step (alias: s = 50/120/140)"));
+    Serial.println(F("#   pump <duty%> [s] | off    -> open-loop pump bench (dimmer/SSR)"));
     Serial.println(F("#   cal start [endC] [stepC] [maxDuty%] -> NTC soak calibration vs TC"));
     Serial.println(F("#   cal stop                  -> abort calibration"));
     Serial.println(F("#   ntc show                  -> print R0/Beta"));
@@ -267,6 +269,25 @@ void processLine(char* line, uint32_t nowMs) {
                           dutyPct, static_cast<unsigned long>(secs), abortC);
         } else {
             Serial.println(F("# tuning: refused (faulted or profile incomplete)"));
+        }
+    } else if (!std::strcmp(tok, "pump")) {
+        const char* a = std::strtok(nullptr, " \t");
+        const char* b = std::strtok(nullptr, " \t");
+        if (a == nullptr) {
+            Serial.println(F("# pump: expected <duty%> [s] or 'off'"));
+        } else if (!std::strcmp(a, "off")) {
+            g_tempLoop.stopPumpBench();
+            Serial.println(F("# pump: off"));
+        } else {
+            const float dutyPct = std::atof(a);
+            const uint32_t secs = b ? static_cast<uint32_t>(std::atol(b)) : 5;
+            g_tempLoop.startPumpBench(nowMs, dutyPct / 100.0f, secs * 1000UL);
+            if (g_tempLoop.pumpBenchActive()) {
+                Serial.printf("# pump: duty=%.0f%% for %lus\n", dutyPct,
+                              static_cast<unsigned long>(secs));
+            } else {
+                Serial.println(F("# pump: refused (brewing/flushing or no pump output)"));
+            }
         }
     } else if (!std::strcmp(tok, "cal")) {
         const char* sub = std::strtok(nullptr, " \t");

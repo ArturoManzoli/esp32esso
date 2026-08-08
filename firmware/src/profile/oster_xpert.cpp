@@ -68,8 +68,10 @@ hal::GpioDiscreteOutput g_heaterRelay(kPins.heaterSsr, /*activeHigh=*/true);
 ThermocoupleSensor g_groupTempSensor(kPins.thermocoupleCs,
                                      kPins.thermocoupleSck,
                                      kPins.thermocoupleMiso);
-// Brew pump/valve SSR; activeLow matches common 5 V dual-channel SSR boards.
-hal::GpioDiscreteOutput g_brewRelay(kPins.brewSsr, /*activeHigh=*/false);
+// Brew pump: Standard AC phase-dimmer (DIM + Z-C), not a zero-cross SSR.
+hal::AcPhaseDimmer g_pumpDimmer(kPins.pumpSsr, kPins.pumpZc);
+// Brew valve SSR, alone; activeLow matches common 5 V dual-channel SSR boards.
+hal::GpioDiscreteOutput g_brewValveRelay(kPins.brewValveSsr, /*activeHigh=*/false);
 // Relief valve SSR; activeLow matches common 5 V dual-channel SSR boards.
 hal::GpioDiscreteOutput g_solenoidValve(kPins.solenoidValve, /*activeHigh=*/false);
 #if defined(ESP32ESSO_PRESSURE_ADC)
@@ -106,8 +108,7 @@ const MachineProfile kOsterXpertProfile = {
             // thermoblock must run hotter than the cup target. Seed the slider
             // at +8 °C above the cup target on first boot; the phone tunes it
             // live in ±50 °C. The bound keeps the safety cap out of reach even
-            // when the user pushes the offset to the extreme, and doubles as the
-            // headroom the group-direct block ceiling is allowed.
+            // when the user pushes the offset to the extreme.
             .defaultThermoblockOffsetC = 8.0f,
             .maxThermoblockOffsetC = 50.0f,
             // Full duty only allowed >50 C below the setpoint; the drive tapers
@@ -142,9 +143,13 @@ const MachineProfile kOsterXpertProfile = {
     .solenoidValve = nullptr,
 #endif
 #if defined(ESP32ESSO_TIER2)
-    .brewRelay = &g_brewRelay,
+    .pumpRelay = nullptr,
+    .pumpDimmer = &g_pumpDimmer,
+    .brewValveRelay = &g_brewValveRelay,
 #else
-    .brewRelay = nullptr,
+    .pumpRelay = nullptr,
+    .pumpDimmer = nullptr,
+    .brewValveRelay = nullptr,
 #endif
 #if defined(ESP32ESSO_TIER2) && defined(ESP32ESSO_PRESSURE_ADC)
     .pressureSensor = &g_pressureSensor,
@@ -176,7 +181,8 @@ void initActiveProfilePeripherals() {
     // is not left claimed by the thermocouple bus driver.
     g_heaterRelay.begin();
 #if defined(ESP32ESSO_TIER2)
-    g_brewRelay.begin();
+    g_pumpDimmer.begin();
+    g_brewValveRelay.begin();
     g_solenoidValve.begin();
 #if defined(ESP32ESSO_PRESSURE_ADC)
     g_pressureSensor.begin();

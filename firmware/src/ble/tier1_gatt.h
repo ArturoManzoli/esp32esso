@@ -24,15 +24,38 @@ inline constexpr const char* kFlushUuid = "a7b3c210-0009-4000-8000-000000000001"
 // value pins the thermoblock at that temperature, overriding group + offset;
 // writing 0 (or NaN) clears the override.
 inline constexpr const char* kThermoblockSetpointUuid = "a7b3c210-000a-4000-8000-000000000001";
+// Pump pressure-ramp / soft-start duration (4-byte float seconds). 0 disables
+// the ramp; a positive value time-proportions the pump SSR so pressure builds
+// gradually over that many seconds at shot start.
+inline constexpr const char* kPumpRampUuid = "a7b3c210-000b-4000-8000-000000000001";
+// Brew pressure/flow profile program (variable-length blob). Little-endian:
+// an 8-byte header { u8 version, u8 phaseCount, u8[2] reserved, f32 temperature }
+// followed by phaseCount x 28-byte phase records
+// { u8 mode(0=pressure,1=flow), u8 curve(0=instant,1=linear,2=ease),
+//   u8 valveOpen, u8 reserved, f32 targetStart, f32 targetEnd, f32 transitionSec,
+//   f32 durationSec, f32 restriction, f32 stopPressureAbove }.
+// A header with phaseCount 0 (or a payload shorter than one phase) clears the
+// profile. See BrewProfile.toWireBytes in the app and protocol/ble/tier2.md.
+inline constexpr const char* kBrewProfileUuid = "a7b3c210-000c-4000-8000-000000000001";
+// Manual brew-pressure hold (4-byte float bar). A positive value pins the shot
+// at that pressure, overriding the selected brew profile; 0 (or NaN) clears the
+// hold and returns the shot to the profile / ramp behaviour.
+inline constexpr const char* kPressureSetpointUuid = "a7b3c210-000d-4000-8000-000000000001";
 inline constexpr const char* kDeviceName = "Esp32esso";
 
-inline constexpr size_t kMachineStateSize = 52;
+inline constexpr size_t kMachineStateSize = 60;
 inline constexpr size_t kSettingsSize = 20;
+inline constexpr size_t kBrewProfileHeaderSize = 8;
+inline constexpr size_t kBrewProfilePhaseSize = 28;
+inline constexpr size_t kBrewProfileMaxPhases = 12;
 
-// 52-byte MachineState v3. Tier 3/4 lanes (pressure/flow/weight) are carried
-// as NaN stubs so the brew graph can allocate them before the hardware lands.
+// 60-byte MachineState v5. Tier 3/4 lanes (flow/weight) are carried as NaN
+// stubs so the brew graph can allocate them before the hardware lands.
 // `thermoblock_offset_c` reports the current thermoblock setpoint offset (was
 // "gain" in v2); `flushing` reports whether a grouphead-flush pulse is live.
+// Each version appends its fields after the previous ones -- v4 the manual
+// pressure hold, v5 `profile_elapsed_sec` -- so an older reader that consumes
+// only the first 52 or 56 bytes still parses correctly.
 struct MachineStateWire {
     float thermoblock_temp_c;
     float group_temp_c;
@@ -54,7 +77,10 @@ struct MachineStateWire {
     uint8_t heater_enabled;    // 1 when the master heater enable is on
     uint8_t flushing;          // 1 while a grouphead flush pulse is active
     uint8_t thermoblock_manual;  // 1 when an absolute manual setpoint overrides group+offset
-    uint8_t _pad[2];           // keep the struct at 52 bytes / 4-byte aligned
+    uint8_t pressure_manual;   // 1 when an operator-set pressure hold overrides the profile
+    uint8_t _pad[1];           // keep the trailing float 4-byte aligned
+    float pressure_setpoint_bar;  // operator-set hold target; NaN when not held
+    float profile_elapsed_sec;    // position on the running profile; NaN when idle
 };
 
 static_assert(sizeof(MachineStateWire) == kMachineStateSize);
