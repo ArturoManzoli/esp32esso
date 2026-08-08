@@ -60,7 +60,11 @@ class MainActivity : ComponentActivity() {
                 val uiState by viewModel.uiState.collectAsState()
                 val displayShotTimeMs by viewModel.displayShotTimeMs.collectAsState()
                 val pendingReport by viewModel.pendingReport.collectAsState()
+                val lastReport by viewModel.lastReport.collectAsState()
+                val lastReportShotId by viewModel.lastReportShotId.collectAsState()
                 val demoMode by viewModel.demoMode.collectAsState()
+                val selectedProfileId by viewModel.selectedProfileId.collectAsState()
+                val selectedProfile = BrewProfileLibrary.byId(selectedProfileId)
                 val beans by viewModel.beans.collectAsState()
                 val grinders by viewModel.grinders.collectAsState()
                 val waters by viewModel.waters.collectAsState()
@@ -101,9 +105,6 @@ class MainActivity : ComponentActivity() {
                     )
                     Screen.Ranking -> RankingScreen(
                         shots = shots,
-                        beans = beans,
-                        grinders = grinders,
-                        onDelete = viewModel::deleteShot,
                         onOpen = { shot ->
                             // Ranking taps reopen the report in read-only mode
                             // with the persisted shot as the source of truth,
@@ -113,6 +114,17 @@ class MainActivity : ComponentActivity() {
                             currentShotId = shot.id
                             reportReadOnly = true
                             screen = Screen.ShotReport
+                        },
+                        // Only offered while the last brew hasn't been saved
+                        // yet (see MainViewModel.lastReportShotId) -- once it
+                        // has, it already has its own card in the list above.
+                        onOpenLastReport = lastReport?.takeIf { lastReportShotId == null }?.let { last ->
+                            {
+                                report = last
+                                currentShotId = null
+                                reportReadOnly = false
+                                screen = Screen.ShotReport
+                            }
                         },
                         onBack = { screen = Screen.Main },
                     )
@@ -136,6 +148,7 @@ class MainActivity : ComponentActivity() {
                                     if (!reportReadOnly && currentShotId == null) {
                                         viewModel.autoSaveShot(current) { id ->
                                             currentShotId = id
+                                            viewModel.markLastReportSaved(id)
                                         }
                                     }
                                 },
@@ -168,11 +181,13 @@ class MainActivity : ComponentActivity() {
                         onConnect = { requestPermissionsAndConnect() },
                         onDisconnect = viewModel::disconnect,
                         onSetpointChanged = viewModel::applySetpoint,
-                        onOffsetChanged = viewModel::applyThermoblockOffset,
                         onThermoblockSetpointChanged = viewModel::applyThermoblockSetpoint,
+                        onPressureSetpointChanged = viewModel::applyPressureSetpoint,
                         onBrewToggle = viewModel::setBrewing,
+                        onProfileBrewToggle = viewModel::setProfileBrewing,
                         onHeaterToggle = viewModel::setHeaterEnabled,
                         onPreinfusionChanged = viewModel::applyPreinfusion,
+                        onPumpRampChanged = viewModel::applyPumpRamp,
                         onFlush = viewModel::triggerFlush,
                         onOpenSettings = { screen = Screen.Settings },
                         onOpenLibrary = { screen = Screen.Library },
@@ -181,6 +196,8 @@ class MainActivity : ComponentActivity() {
                         onSecretShowReport = viewModel::injectDemoReport,
                         demoMode = demoMode,
                         displayShotTimeMs = displayShotTimeMs,
+                        selectedProfile = selectedProfile,
+                        onProfileSelected = viewModel::applyBrewProfile,
                     )
                 }
 
@@ -261,6 +278,8 @@ private fun shotToReport(shot: ShotEntity): ShotReport {
         avgGroupC = shot.avgGroupC ?: Float.NaN,
         finalGroupC = shot.finalGroupC,
         peakGroupC = shot.peakGroupC,
+        thermoblockOffsetC = shot.thermoblockOffsetC ?: Float.NaN,
+        thermoblockManual = shot.thermoblockManual,
         samples = samples,
         shotStartUptimeMs = startUptime,
         shotEndUptimeMs = endUptime,
@@ -271,7 +290,7 @@ private fun shotToReport(shot: ShotEntity): ShotReport {
 private fun ShotReportPrompt(onShow: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Shot finished") },
+        title = { Text("Brew finished") },
         text = { Text("Show the brew report?") },
         confirmButton = { TextButton(onClick = onShow) { Text("Show brew report") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Not now") } },

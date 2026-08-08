@@ -2,6 +2,7 @@ package com.esp32esso.tier1.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -29,6 +30,7 @@ fun FrostCard(
     modifier: Modifier = Modifier,
     accent: Boolean = false,
     contentPadding: PaddingValues = PaddingValues(20.dp),
+    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
@@ -39,6 +41,7 @@ fun FrostCard(
                 .background(FrostFillBrush)
                 .border(if (accent) FrostBorderAccent else FrostBorder, FrostShape)
                 .padding(contentPadding),
+        verticalArrangement = verticalArrangement,
         content = content,
     )
 }

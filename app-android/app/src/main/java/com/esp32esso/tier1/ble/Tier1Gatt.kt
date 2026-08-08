@@ -21,7 +21,22 @@ object Tier1Gatt {
     val flushUuid: UUID = UUID.fromString("a7b3c210-0009-4000-8000-000000000001")
     // Absolute manual thermoblock setpoint (°C float); 0 clears the override.
     val thermoblockSetpointUuid: UUID = UUID.fromString("a7b3c210-000a-4000-8000-000000000001")
+    // Pump pressure-ramp / soft-start duration (float seconds); 0 disables it.
+    val pumpRampUuid: UUID = UUID.fromString("a7b3c210-000b-4000-8000-000000000001")
+    // Brew pressure/flow profile program (variable-length blob; see BrewProfile
+    // .toWireBytes / protocol/ble/tier2.md). An 8-byte header with phaseCount 0
+    // clears the profile.
+    val brewProfileUuid: UUID = UUID.fromString("a7b3c210-000c-4000-8000-000000000001")
+    // Manual brew-pressure hold (float bar); 0 clears it and returns the shot to
+    // the selected profile.
+    val pressureSetpointUuid: UUID = UUID.fromString("a7b3c210-000d-4000-8000-000000000001")
+    // v3 payload size, still the minimum a notification must carry. v4 appends
+    // the manual pressure hold and v5 the running profile's position; parsing
+    // stays tolerant of any of the three lengths so a newer app keeps working
+    // against firmware that predates either field.
     const val machineStateSize = 52
+    const val machineStateSizeV4 = 56
+    const val machineStateSizeV5 = 60
     const val settingsSize = 20
 }
 
@@ -48,6 +63,11 @@ data class MachineState(
     val heaterEnabled: Boolean,
     val flushing: Boolean,
     val thermoblockManual: Boolean,
+    val pressureManual: Boolean = false,
+    val pressureSetpointBar: Float = Float.NaN,
+    // Seconds into the running brew profile's own timeline (phases that ended
+    // early on pressure skip ahead), or NaN when no profile is driving the pump.
+    val profileElapsedSec: Float = Float.NaN,
 ) {
     val faultLabel: String?
         get() = when (faultCode) {
@@ -81,7 +101,12 @@ data class MachineState(
             val heaterEnabled = b.get().toInt() and 0xFF
             val flushing = b.get().toInt() and 0xFF
             val thermoblockManual = b.get().toInt() and 0xFF
-            // 2 pad bytes reserved for future flags — ignored on read.
+            val hasV4 = bytes.size >= Tier1Gatt.machineStateSizeV4
+            val pressureManual = if (hasV4) b.get().toInt() and 0xFF else 0
+            if (hasV4) b.get()  // pad, keeps the trailing float aligned
+            val pressureSetpoint = if (hasV4) b.float else Float.NaN
+            val profileElapsed =
+                if (bytes.size >= Tier1Gatt.machineStateSizeV5) b.float else Float.NaN
             return MachineState(
                 thermoblockTempC = thermoblock,
                 groupTempC = group,
@@ -107,6 +132,9 @@ data class MachineState(
                 heaterEnabled = heaterEnabled != 0,
                 flushing = flushing != 0,
                 thermoblockManual = thermoblockManual != 0,
+                pressureManual = pressureManual != 0,
+                pressureSetpointBar = pressureSetpoint,
+                profileElapsedSec = profileElapsed,
             )
         }
     }

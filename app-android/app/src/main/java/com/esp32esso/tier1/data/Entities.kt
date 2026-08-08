@@ -72,6 +72,12 @@ data class ShotEntity(
     val avgGroupC: Float? = null,
     val peakGroupC: Float,
     val finalGroupC: Float,
+    // Thermoblock offset in effect during the shot and whether it ran with an
+    // absolute manual override, so later shots can calibrate the auto-offset
+    // (see MainViewModel.calculatedThermoblockOffsetC). Null/false for rows
+    // saved before this was tracked.
+    val thermoblockOffsetC: Float? = null,
+    val thermoblockManual: Boolean = false,
     // User-editable label shown atop the brew report's Grade card; blank
     // renders as "Untitled Brew" rather than persisting that literal string.
     val name: String = "",

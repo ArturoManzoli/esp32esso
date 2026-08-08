@@ -14,6 +14,13 @@ data class ShotReport(
     val avgGroupC: Float,
     val finalGroupC: Float,
     val peakGroupC: Float,
+    // Thermoblock offset in effect when the shot ended, and whether that shot
+    // ran under an absolute manual thermoblock override rather than the
+    // group+offset relation. Persisted on ShotEntity so later shots can
+    // calibrate the auto-offset from history (see
+    // MainViewModel.calculatedThermoblockOffsetC).
+    val thermoblockOffsetC: Float = Float.NaN,
+    val thermoblockManual: Boolean = false,
     // Full slice of samples from (startUptime - 10s) to (endUptime + 10s) so the
     // report graph shows lead-in and cool-down context around the shot itself.
     val samples: List<GraphSample>,
