@@ -13,24 +13,33 @@ namespace esp32esso::control {
 // Tier 1: holds a single setpoint against the thermoblock sensor, runs the
 // PID, and drives the heater relay through slow-PWM.
 //
-// Tier 2 offset: when a group/portafilter sensor is bound, the user setpoint
-// targets the *group* temperature and the inner PID chases:
+// Tier 2: when a group/portafilter sensor is bound and the operator has fixed a
+// group target (no absolute thermoblock override), the PID closes *directly on
+// the group temperature* -- the user setpoint is the cup target and the heater
+// is driven so the group probe reaches it, letting the thermoblock settle at
+// whatever temperature that takes. The block sensor is kept purely as the
+// safety reference (fault latch + self-clearing overtemp trip) plus a soft
+// ceiling that bounds how hot the block may run (groupSetpoint +
+// maxThermoblockOffsetC, below the hard cut) so the slow group probe cannot
+// cook the block toward the safety cut.
 //
-//   thermoblockSetpoint = groupSetpoint + thermoblockOffsetC
+// The thermoblockOffsetC still derives the reported thermoblock setpoint
+// (groupSetpoint + offset) and, as above, sets the block ceiling. It is clamped
+// to [-maxThermoblockOffsetC, +maxThermoblockOffsetC]. Positive offsets are the
+// "thermoblock" side of the phone slider, negative the "grouphead" side.
 //
-// Positive offsets over-drive the thermoblock to compensate transport loss
-// down to the puck (right side of the phone slider, labelled "thermoblock").
-// Negative offsets pull the thermoblock cooler than the cup target ("grouphead"
-// side of the slider). The offset is clamped to
-// [-maxThermoblockOffsetC, +maxThermoblockOffsetC] and the hard safety cap
-// still applies. A group-sensor fault degrades gracefully to Tier 1 behaviour
-// (control the thermoblock at the setpoint directly) rather than latching,
-// since the thermoblock sensor still guards safety.
+// When the operator pins an absolute thermoblock temperature, or the group
+// sensor faults / is absent, the loop falls back to controlling the thermoblock
+// against its derived setpoint directly (Tier 1 behaviour), since the block
+// sensor still guards safety.
 //
 // Safety contract (must hold at every tick):
 //   - the heater is OFF whenever the thermoblock sensor is in a fault state
+//     (latched until the operator calls clearFault())
 //   - the heater is OFF whenever the thermoblock temperature is at or above
-//     `profile.thermal.maxSafeTempC` (latched until the loop is reset)
+//     `profile.thermal.maxSafeTempC`; this trip clears itself automatically
+//     once the thermoblock cools back to kOvertempRecoveryC (see .cpp) --
+//     no operator action required
 //   - the heater is OFF whenever no profile/relay was provided
 class TemperatureLoop {
 public:
@@ -128,8 +137,10 @@ public:
     float pressureBar() const { return pressureBar_; }
     bool pressureOk() const { return pressureOk_; }
 
-    // Clears the latched fault (e.g. after the operator inspects the
-    // sensor wiring). Does not modify the setpoint.
+    // Clears a latched fault (e.g. after the operator inspects the sensor
+    // wiring). Does not modify the setpoint. Note: an overtemp trip clears
+    // itself automatically once the block cools down, so this is normally
+    // only needed for a sensor-fault latch.
     void clearFault();
 
     // Open-loop step-response bench. Bypasses the PID and drives the heater
@@ -189,6 +200,7 @@ private:
     void updateHeaterTimeout(uint32_t nowMs);
     float computeThermoblockSetpoint() const;
     void latchFault(const char* reason);
+    void tripOvertemp();
 
     const profile::MachineProfile* profile_ = nullptr;
     Pid pid_;
@@ -198,6 +210,10 @@ private:
     float lastOutput_ = 0.0f;
     bool faulted_ = false;
     const char* faultReason_ = "";
+    // True while the current latch is an overtemp trip (as opposed to e.g. a
+    // sensor fault), so runPidIfDue() knows it may clear itself once the
+    // thermoblock cools back down instead of waiting for clearFault().
+    bool overtempAutoRecover_ = false;
 
     // Tier 2 thermoblock offset state
     float thermoblockOffsetC_ = 0.0f;

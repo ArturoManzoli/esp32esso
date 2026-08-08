@@ -44,10 +44,12 @@ struct ThermalConfig {
     // Soft-landing approach taper. The heater duty is ceilinged at
     // approachDutyPerC * (setpoint - measured) so the loop eases off well before
     // the setpoint instead of holding full power right up to it. The thermoblock
-    // stores enough heat that a full-power approach coasts far past the target
-    // (the aluminium block + cartridge stay hotter than the probe reads on the
-    // way up), so capping the drive within the last few degrees keeps that
-    // stored-heat gradient -- and thus the coast -- small. 0 disables the taper.
+    // stores enough heat that even a tapered approach coasts several degrees past
+    // the target (the aluminium block + cartridge stay hotter than the probe
+    // reads on the way up, and that gradient only bleeds off passively -- there
+    // is no active cooling), so the taper needs to start reining in duty well
+    // before the final few degrees, not just within them. A smaller value here
+    // means a wider, gentler taper band. 0 disables the taper.
     float approachDutyPerC;
 };
 
