@@ -1,50 +1,58 @@
 package com.esp32esso.tier1.ui
 
+import android.content.res.Configuration
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.graphics.rememberGraphicsLayer
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.esp32esso.tier1.data.BeanEntity
-import com.esp32esso.tier1.data.GrinderEntity
+import androidx.compose.ui.unit.sp
 import com.esp32esso.tier1.data.ShotEntity
+import com.esp32esso.tier1.data.ShotSamples
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 enum class RankAxis(val label: String) {
+    Recent("Most recent"),
     Overall("Overall"),
     Acidity("Acidity"),
     Bitterness("Bitterness"),
@@ -61,33 +69,38 @@ enum class DateWindow(val label: String, val windowDays: Int?) {
     Last90("90d", 90),
 }
 
-// Ranking wall: filter chips at the top select which grade axis to sort by
-// (Overall by default). Ungraded shots (score 0 on the axis) are hidden so the
-// list stays useful — a shot without an Overall grade won't show up under
-// Overall.
+// Ranking wall: two dropdown selectors inline in the top bar pick the sort
+// order (most recent first by default) and the date window. Grade-based axes
+// hide ungraded brews (score 0 on the axis) so the list stays useful — a brew
+// without an Overall grade won't show up under Overall — while "Most recent"
+// shows every brew in the window regardless of grading.
 @Composable
 fun RankingScreen(
     shots: List<ShotEntity>,
-    beans: List<BeanEntity>,
-    grinders: List<GrinderEntity>,
-    onDelete: (ShotEntity) -> Unit,
     onOpen: (ShotEntity) -> Unit,
+    // Non-null only while the most recently finished brew hasn't been saved
+    // yet -- i.e. the operator dismissed the "Show brew report?" prompt (or
+    // hasn't acted on it) and might regret it. Null hides the button.
+    onOpenLastReport: (() -> Unit)?,
     onBack: () -> Unit,
 ) {
-    var axis by remember { mutableStateOf(RankAxis.Overall) }
+    var axis by remember { mutableStateOf(RankAxis.Recent) }
     var window by remember { mutableStateOf(DateWindow.All) }
     val scored =
         remember(shots, axis, window) {
             val cutoffMs = window.windowDays?.let {
                 System.currentTimeMillis() - it * 24L * 60L * 60L * 1000L
             }
-            shots
-                .asSequence()
-                .filter { cutoffMs == null || it.savedAtEpochMs >= cutoffMs }
-                .map { it to scoreFor(it, axis) }
-                .filter { it.second > 0 }
-                .sortedByDescending { it.second }
-                .toList()
+            val inWindow = shots.asSequence().filter { cutoffMs == null || it.savedAtEpochMs >= cutoffMs }
+            if (axis == RankAxis.Recent) {
+                inWindow.sortedByDescending { it.savedAtEpochMs }.map { it to 0 }.toList()
+            } else {
+                inWindow
+                    .map { it to scoreFor(it, axis) }
+                    .filter { it.second > 0 }
+                    .sortedByDescending { it.second }
+                    .toList()
+            }
         }
 
     // Tablet centre-cap: keep the ranking column at a comfortable reading
@@ -97,61 +110,46 @@ fun RankingScreen(
         contentAlignment = Alignment.TopCenter,
     ) {
       Column(
-        modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = Modifier.fillMaxWidth().widthIn(max = 760.dp)
+            .padding(start = 20.dp, top = 6.dp, end = 20.dp, bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
       ) {
+        // 30% shorter than the original: a smaller icon-button footprint and
+        // a smaller title cut the row's own height, and the dropdowns'
+        // tighter content padding matches.
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) {
+            IconButton(onClick = onBack, modifier = Modifier.size(34.dp)) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = EssoOrange)
             }
             Text(
-                text = "Ranking",
-                style = MaterialTheme.typography.headlineSmall,
+                text = "Recent brews",
+                style = MaterialTheme.typography.headlineSmall.copy(fontSize = 17.sp),
                 fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f).padding(start = 6.dp),
             )
+            DropdownSelector(selected = axis, options = RankAxis.entries, optionLabel = { it.label }, onSelect = { axis = it })
+            Spacer(Modifier.width(6.dp))
+            DropdownSelector(selected = window, options = DateWindow.entries, optionLabel = { it.label }, onSelect = { window = it })
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            RankAxis.entries.forEach { candidate ->
-                FilterChip(
-                    selected = candidate == axis,
-                    onClick = { axis = candidate },
-                    label = { Text(candidate.label) },
-                    colors =
-                        FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = EssoOrange.copy(alpha = 0.25f),
-                            selectedLabelColor = EssoOrange,
-                        ),
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            DateWindow.entries.forEach { candidate ->
-                FilterChip(
-                    selected = candidate == window,
-                    onClick = { window = candidate },
-                    label = { Text(candidate.label) },
-                    colors =
-                        FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = EssoOrange.copy(alpha = 0.25f),
-                            selectedLabelColor = EssoOrange,
-                        ),
-                )
-            }
+        if (onOpenLastReport != null) {
+            Button(
+                onClick = onOpenLastReport,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = EssoOrange),
+            ) { Text("Show last brew report") }
         }
 
         if (scored.isEmpty()) {
             FrostCard {
                 val windowNote = if (window == DateWindow.All) "" else " in the last ${window.label}"
+                val message = if (axis == RankAxis.Recent) {
+                    "No brews saved$windowNote.\nSave a brew from the brew report screen to populate this list."
+                } else {
+                    "No brews graded on ${axis.label.lowercase()}$windowNote.\nGrade a brew from the brew report screen to populate this list."
+                }
                 Text(
-                    text = "No shots graded on ${axis.label.lowercase()}$windowNote.\nGrade a shot from the brew report screen to populate this list.",
+                    text = message,
                     color = EssoOnSurfaceMuted,
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -160,11 +158,7 @@ fun RankingScreen(
             scored.forEach { (shot, _) ->
                 ShotRankCard(
                     shot = shot,
-                    axis = axis,
-                    bean = beans.firstOrNull { it.id == shot.beanId },
-                    grinder = grinders.firstOrNull { it.id == shot.grinderId },
                     onOpen = { onOpen(shot) },
-                    onDelete = { onDelete(shot) },
                 )
             }
         }
@@ -172,119 +166,175 @@ fun RankingScreen(
     }
 }
 
+// Compact "current value + caret" trigger that opens a DropdownMenu of
+// `options`. Used to keep the axis/date filters inline in the top bar instead
+// of burning two full rows of chips.
 @Composable
-private fun ShotRankCard(
-    shot: ShotEntity,
-    axis: RankAxis,
-    bean: BeanEntity?,
-    grinder: GrinderEntity?,
-    onOpen: () -> Unit,
-    onDelete: () -> Unit,
+private fun <T> DropdownSelector(
+    selected: T,
+    options: List<T>,
+    optionLabel: (T) -> String,
+    onSelect: (T) -> Unit,
 ) {
-    val layer = rememberGraphicsLayer()
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val title = bean?.name ?: "Untitled shot"
-
-    // Card body is what we capture for sharing; making it the clickable target
-    // (rather than the outer FrostCard) keeps the ripple contained and lets
-    // the icon column stay out of the tap area.
-    FrostCard {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .drawWithContent {
-                    layer.record { this@drawWithContent.drawContent() }
-                    drawLayer(layer)
-                },
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(
+            onClick = { expanded = true },
+            colors = ButtonDefaults.textButtonColors(contentColor = EssoOrange),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
         ) {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable(onClick = onOpen),
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                val specs = beanSpecs(bean)
-                if (specs.isNotBlank()) {
-                    Text(text = specs, color = EssoOnSurfaceMuted, style = MaterialTheme.typography.bodySmall)
-                }
-                val g = grinderLine(grinder, shot.grinderSetting)
-                if (g.isNotBlank()) {
-                    Text(text = g, color = EssoOnSurfaceMuted, style = MaterialTheme.typography.bodySmall)
-                }
-                Spacer(Modifier.height(6.dp))
-                StarRow("Overall", shot.overall)
-                StarRow(axis.label, scoreFor(shot, axis).coerceAtLeast(0))
-                val bits = buildList {
-                    add("%d s".format((shot.durationMs / 1000L).toInt()))
-                    add("peak %.1f bar".format(shot.peakBar))
-                    add("%d°C".format(shot.targetC.toInt()))
-                    shot.doseG?.let { add("dose %.1f g".format(it)) }
-                }
-                Text(
-                    text = bits.joinToString(" · "),
-                    color = EssoOnSurfaceMuted,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-            // Right-hand action column: delete + share stacked at the top,
-            // date pinned just below them. Grouped this way per the layout
-            // spec so the icons read as a single cluster.
-            Column(horizontalAlignment = Alignment.End) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onDelete) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Delete shot", tint = EssoError)
-                    }
-                    IconButton(onClick = {
-                        shareLayerAsImage(context, scope, layer, "Shot · $title")
-                    }) {
-                        Icon(Icons.Filled.Share, contentDescription = "Share", tint = EssoOrange)
-                    }
-                }
-                Text(
-                    text = formatDate(shot.savedAtEpochMs),
-                    color = EssoOnSurfaceMuted,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(end = 8.dp),
+            Text(optionLabel(selected), style = MaterialTheme.typography.bodyMedium)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(optionLabel(option)) },
+                    onClick = { onSelect(option); expanded = false },
+                    trailingIcon = if (option == selected) {
+                        { Icon(Icons.Filled.Check, contentDescription = null, tint = EssoOrange) }
+                    } else {
+                        null
+                    },
                 )
             }
         }
     }
 }
 
+// Fixed (unscaled) width of the ratings block before the 30% shrink below —
+// wide enough for the longest label ("Bitterness") plus five stars laid out
+// side by side, same as the brew report's Grade card.
+private val RatingsBlockWidth = 240.dp
+// 30% narrower than the graph's original 480 dp thumbnail width.
+private val GraphBlockWidth = 336.dp
+
+@Composable
+private fun ShotRankCard(
+    shot: ShotEntity,
+    onOpen: () -> Unit,
+) {
+    // Mirrors the brew report's own fallback so a brew renamed there shows up
+    // the same way here, rather than always reading "Untitled shot".
+    val fullTitle = shot.name.ifBlank { "Untitled Brew" }
+    val title = if (fullTitle.length > 42) fullTitle.take(42) + "…" else fullTitle
+    // Tablet rotation toggles the graph column on/off; portrait drops it so
+    // the remaining two columns (title/specs, ratings) still fit comfortably.
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    // Samples decode once per shot (not per recomposition) since they back
+    // both the graph and the average-thermoblock spec below.
+    val samples = remember(shot.id) { ShotSamples.decode(shot.samplesJson) }
+    val shotWindow = remember(shot.id, samples) {
+        val start = samples.firstOrNull()?.uptimeMs?.plus(10_000L) ?: return@remember null
+        start..(start + shot.durationMs)
+    }
+    val avgThermoblockC = remember(shot.id, samples, shotWindow) {
+        val win = shotWindow ?: return@remember null
+        val temps = samples.filter { it.uptimeMs in win && !it.thermoblockC.isNaN() }.map { it.thermoblockC }
+        if (temps.isEmpty()) null else temps.average().toFloat()
+    }
+
+    val bits = buildList {
+        add("%d s".format((shot.durationMs / 1000L).toInt()))
+        if (!shot.avgBar.isNaN()) add("avg %.1f bar".format(shot.avgBar))
+        add("target %d°C".format(shot.targetC.toInt()))
+        shot.avgGroupC?.let { add("avg group %.1f°C".format(it)) }
+        avgThermoblockC?.let { add("avg block %.1f°C".format(it)) }
+    }
+
+    // The whole card body is the tap target for opening the report — there
+    // are no more per-card icon actions to fight with a nested clickable.
+    // A single row holds all three columns so the card stays as short as the
+    // tallest one (the ratings block, usually) instead of stacking the graph
+    // underneath and adding its own height on top.
+    FrostCard(contentPadding = PaddingValues(horizontal = 20.dp, vertical = 0.dp)) {
+        // Every column wrap-content and centred against the others: the row
+        // takes the height of its tallest child and the shorter ones sit
+        // centred within it, so the card shrink-fits with no dead strips.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onOpen),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = formatDate(shot.savedAtEpochMs),
+                        color = EssoOnSurfaceMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    bits.forEach { line ->
+                        Text(text = line, color = EssoOnSurfaceMuted, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            if (isLandscape) {
+                // Full graph (axes, gridlines, and the colour-coded legend as
+                // its "subtitle"), scaled down 25% the same draw-time way as
+                // the ratings block. No fillMaxHeight: it wraps its content so
+                // it doesn't force the row taller than it needs to be.
+                Column(
+                    modifier = Modifier.scale(0.75f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    BrewGraph(
+                        history = samples,
+                        shotWindow = shotWindow,
+                        modifier = Modifier.width(GraphBlockWidth).height(150.dp),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    GraphLegend(modifier = Modifier.width(GraphBlockWidth))
+                }
+            }
+            // Label-left/stars-right, exactly like the report's Grade card,
+            // all five axes, scaled to 77% — a draw-time transform (like CSS's)
+            // so the column still reserves its full unscaled footprint. Anchor
+            // the scale to the right edge so the shrunk content hugs the card's
+            // right padding instead of floating centred with a dead gap after
+            // the stars; that keeps the right margin matching the left.
+            Column(
+                modifier = Modifier.width(RatingsBlockWidth).graphicsLayer {
+                    scaleX = 0.77f
+                    scaleY = 0.77f
+                    transformOrigin = TransformOrigin(1f, 0.5f)
+                },
+            ) {
+                StarRow("Bitterness", shot.bitterness)
+                StarRow("Acidity", shot.acidity)
+                StarRow("Body", shot.body)
+                StarRow("Visuals", shot.visuals)
+                StarRow("Overall", shot.overall)
+            }
+        }
+    }
+}
+
+// Only called for the grade-based axes; "Most recent" sorts by date instead
+// and never reaches this function.
 private fun scoreFor(shot: ShotEntity, axis: RankAxis): Int =
     when (axis) {
+        RankAxis.Recent -> 0
         RankAxis.Overall -> shot.overall
         RankAxis.Acidity -> shot.acidity
         RankAxis.Bitterness -> shot.bitterness
         RankAxis.Body -> shot.body
     }
-
-private fun beanSpecs(bean: BeanEntity?): String {
-    if (bean == null) return ""
-    val bits = mutableListOf<String>()
-    if (bean.roaster.isNotBlank()) bits += bean.roaster
-    if (bean.origin.isNotBlank()) bits += bean.origin
-    if (bean.process.isNotBlank()) bits += bean.process
-    if (bean.roastLevel.isNotBlank()) bits += bean.roastLevel
-    return bits.joinToString(" · ")
-}
-
-private fun grinderLine(grinder: GrinderEntity?, setting: String): String {
-    val name = grinder?.name?.takeIf { it.isNotBlank() }
-    val s = setting.takeIf { it.isNotBlank() }
-    return when {
-        name != null && s != null -> "$name @ $s"
-        name != null -> name
-        s != null -> "grind @ $s"
-        else -> ""
-    }
-}
 
 private val dateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 

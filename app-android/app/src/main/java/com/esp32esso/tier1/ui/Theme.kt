@@ -24,6 +24,7 @@ val EssoOrangeSoft = Color(0xFFFFB27A)
 val EssoOnSurface = Color(0xFFF3F2F5)
 val EssoOnSurfaceMuted = Color(0xFFB9B0A6)
 val EssoError = Color(0xFFFF5C5C)
+val EssoGreen = Color(0xFF4CAF7D)
 
 // Background gradient stops. Read top-left → bottom-right as espresso
 // (near-black brown), full-body brown, roast, and finally a burnt-orange

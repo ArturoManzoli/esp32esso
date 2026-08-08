@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RecipeEntity::class,
         ShotEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class EssoDatabase : RoomDatabase() {
@@ -59,6 +59,17 @@ abstract class EssoDatabase : RoomDatabase() {
         private val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE shots ADD COLUMN avgGroupC REAL")
+            }
+        }
+
+        // v7 -> v8: thermoblock offset/manual-override state in effect during
+        // the shot, so future shots can calibrate the auto-offset from history.
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE shots ADD COLUMN thermoblockOffsetC REAL")
+                db.execSQL(
+                    "ALTER TABLE shots ADD COLUMN thermoblockManual INTEGER NOT NULL DEFAULT 0",
+                )
             }
         }
 
@@ -109,6 +120,7 @@ abstract class EssoDatabase : RoomDatabase() {
                     MIGRATION_4_5,
                     MIGRATION_5_6,
                     MIGRATION_6_7,
+                    MIGRATION_7_8,
                 )
                     .build()
                     .also { instance = it }

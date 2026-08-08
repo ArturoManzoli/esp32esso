@@ -1,12 +1,8 @@
 package com.esp32esso.tier1.ui
 
-import android.content.Context
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
@@ -31,12 +27,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
-import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.Button
@@ -44,8 +40,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -55,6 +49,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -64,29 +59,28 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import com.esp32esso.tier1.BrewProfile
+import com.esp32esso.tier1.BrewProfileLibrary
 import com.esp32esso.tier1.ble.BleUiState
 import com.esp32esso.tier1.ble.BrewSource
 import com.esp32esso.tier1.ble.ConnectionPhase
 import com.esp32esso.tier1.ble.GraphSample
 import com.esp32esso.tier1.ble.MachineState
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -130,11 +124,13 @@ fun MainScreen(
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onSetpointChanged: (Float) -> Unit,
-    onOffsetChanged: (Float) -> Unit,
     onThermoblockSetpointChanged: (Float) -> Unit,
+    onPressureSetpointChanged: (Float) -> Unit,
     onBrewToggle: (Boolean) -> Unit,
+    onProfileBrewToggle: (Boolean) -> Unit,
     onHeaterToggle: (Boolean) -> Unit,
     onPreinfusionChanged: (Float) -> Unit,
+    onPumpRampChanged: (Float) -> Unit,
     onFlush: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenLibrary: () -> Unit,
@@ -143,6 +139,8 @@ fun MainScreen(
     onSecretShowReport: () -> Unit,
     demoMode: Boolean,
     displayShotTimeMs: Long,
+    selectedProfile: BrewProfile?,
+    onProfileSelected: (BrewProfile?) -> Unit,
 ) {
     val connected = uiState.phase == ConnectionPhase.Connected
     // Render the live state when we have it, otherwise fall back to the offline
@@ -161,11 +159,13 @@ fun MainScreen(
             onConnect = onConnect,
             onDisconnect = onDisconnect,
             onSetpointChanged = onSetpointChanged,
-            onOffsetChanged = onOffsetChanged,
             onThermoblockSetpointChanged = onThermoblockSetpointChanged,
+            onPressureSetpointChanged = onPressureSetpointChanged,
             onBrewToggle = onBrewToggle,
+            onProfileBrewToggle = onProfileBrewToggle,
             onHeaterToggle = onHeaterToggle,
             onPreinfusionChanged = onPreinfusionChanged,
+            onPumpRampChanged = onPumpRampChanged,
             onFlush = onFlush,
             onOpenSettings = onOpenSettings,
             onOpenLibrary = onOpenLibrary,
@@ -174,6 +174,8 @@ fun MainScreen(
             onSecretShowReport = onSecretShowReport,
             demoMode = demoMode,
             displayShotTimeMs = displayShotTimeMs,
+            selectedProfile = selectedProfile,
+            onProfileSelected = onProfileSelected,
         )
     } else {
         MainScreenNarrow(
@@ -183,11 +185,13 @@ fun MainScreen(
             onConnect = onConnect,
             onDisconnect = onDisconnect,
             onSetpointChanged = onSetpointChanged,
-            onOffsetChanged = onOffsetChanged,
             onThermoblockSetpointChanged = onThermoblockSetpointChanged,
+            onPressureSetpointChanged = onPressureSetpointChanged,
             onBrewToggle = onBrewToggle,
+            onProfileBrewToggle = onProfileBrewToggle,
             onHeaterToggle = onHeaterToggle,
             onPreinfusionChanged = onPreinfusionChanged,
+            onPumpRampChanged = onPumpRampChanged,
             onFlush = onFlush,
             onOpenSettings = onOpenSettings,
             onOpenLibrary = onOpenLibrary,
@@ -196,6 +200,8 @@ fun MainScreen(
             onSecretShowReport = onSecretShowReport,
             demoMode = demoMode,
             displayShotTimeMs = displayShotTimeMs,
+            selectedProfile = selectedProfile,
+            onProfileSelected = onProfileSelected,
         )
     }
 }
@@ -209,11 +215,13 @@ private fun MainScreenNarrow(
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onSetpointChanged: (Float) -> Unit,
-    onOffsetChanged: (Float) -> Unit,
     onThermoblockSetpointChanged: (Float) -> Unit,
+    onPressureSetpointChanged: (Float) -> Unit,
     onBrewToggle: (Boolean) -> Unit,
+    onProfileBrewToggle: (Boolean) -> Unit,
     onHeaterToggle: (Boolean) -> Unit,
     onPreinfusionChanged: (Float) -> Unit,
+    onPumpRampChanged: (Float) -> Unit,
     onFlush: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenLibrary: () -> Unit,
@@ -222,6 +230,8 @@ private fun MainScreenNarrow(
     onSecretShowReport: () -> Unit,
     demoMode: Boolean,
     displayShotTimeMs: Long,
+    selectedProfile: BrewProfile?,
+    onProfileSelected: (BrewProfile?) -> Unit,
 ) {
     Column(
         modifier =
@@ -251,26 +261,31 @@ private fun MainScreenNarrow(
             onHeaterToggle = onHeaterToggle,
             onSetGroupTarget = onSetpointChanged,
             onSetThermoblockTarget = onThermoblockSetpointChanged,
+            onSetPressureTarget = onPressureSetpointChanged,
         )
         ShotCard(
             machine = machine,
             enabled = connected,
-            setpoint = uiState.pendingSetpointC ?: machine.groupSetpointC,
+            setpoint = uiState.pendingSetpointC ?: resolvedGroupTargetC(machine),
             preinfusionSec = uiState.preinfusionSec ?: 2f,
+            pumpRampSec = uiState.pumpRampSec ?: 0f,
             displayShotTimeMs = displayShotTimeMs,
             onBrewToggle = onBrewToggle,
             onApplySetpoint = onSetpointChanged,
             onPreinfusionChanged = onPreinfusionChanged,
+            onPumpRampChanged = onPumpRampChanged,
             onFlush = onFlush,
             onSecretShowReport = onSecretShowReport,
             demoMode = demoMode,
         )
         GraphCard(uiState.history)
-        OffsetCard(
-            offsetC = uiState.pendingThermoblockOffsetC ?: machine.thermoblockOffsetC,
-            manualActive = machine.thermoblockManual,
+        ProfileCard(
+            selected = selectedProfile,
             enabled = connected,
-            onOffsetChanged = onOffsetChanged,
+            running = machine.brewing,
+            elapsedSec = machine.profileElapsedSec,
+            onSelect = onProfileSelected,
+            onRunToggle = onProfileBrewToggle,
         )
     }
 }
@@ -289,11 +304,13 @@ private fun MainScreenWide(
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onSetpointChanged: (Float) -> Unit,
-    onOffsetChanged: (Float) -> Unit,
     onThermoblockSetpointChanged: (Float) -> Unit,
+    onPressureSetpointChanged: (Float) -> Unit,
     onBrewToggle: (Boolean) -> Unit,
+    onProfileBrewToggle: (Boolean) -> Unit,
     onHeaterToggle: (Boolean) -> Unit,
     onPreinfusionChanged: (Float) -> Unit,
+    onPumpRampChanged: (Float) -> Unit,
     onFlush: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenLibrary: () -> Unit,
@@ -302,11 +319,12 @@ private fun MainScreenWide(
     onSecretShowReport: () -> Unit,
     demoMode: Boolean,
     displayShotTimeMs: Long,
+    selectedProfile: BrewProfile?,
+    onProfileSelected: (BrewProfile?) -> Unit,
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             // Vertical padding halved (was 10 dp) and the header→cards gap
             // removed so the four cards ride right up under the top bar.
             .padding(horizontal = 22.dp, vertical = 5.dp),
@@ -323,19 +341,21 @@ private fun MainScreenWide(
             onSecretDemoToggle = onSecretDemoToggle,
         )
 
-        // Row: controls on the left, graph + offset on the right. Height is
-        // pinned to the intrinsic height of the taller (left) column, and the
-        // right column fills it — the graph card then flexes to soak up the
-        // slack so both columns share a top and bottom edge (a flush
-        // rectangle) regardless of the offset card's fixed height.
+        // Row: controls on the left, graph + profile on the right. It claims
+        // every pixel the header leaves, and in each column the bottom card
+        // keeps its natural height while the top one soaks up the slack — so
+        // the four cards fill the panel edge to edge with no dead strip
+        // underneath, whatever the shot and profile cards happen to measure.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(IntrinsicSize.Min),
+                .weight(1f),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Column(
-                modifier = Modifier.weight(0.46f),
+                modifier = Modifier
+                    .weight(0.46f)
+                    .fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 TemperaturesCard(
@@ -344,16 +364,20 @@ private fun MainScreenWide(
                     onHeaterToggle = onHeaterToggle,
                     onSetGroupTarget = onSetpointChanged,
                     onSetThermoblockTarget = onThermoblockSetpointChanged,
+                    onSetPressureTarget = onPressureSetpointChanged,
+                    modifier = Modifier.weight(1f),
                 )
                 ShotCard(
                     machine = machine,
                     enabled = connected,
-                    setpoint = uiState.pendingSetpointC ?: machine.groupSetpointC,
+                    setpoint = uiState.pendingSetpointC ?: resolvedGroupTargetC(machine),
                     preinfusionSec = uiState.preinfusionSec ?: 2f,
+                    pumpRampSec = uiState.pumpRampSec ?: 0f,
                     displayShotTimeMs = displayShotTimeMs,
                     onBrewToggle = onBrewToggle,
                     onApplySetpoint = onSetpointChanged,
                     onPreinfusionChanged = onPreinfusionChanged,
+                    onPumpRampChanged = onPumpRampChanged,
                     onFlush = onFlush,
                     onSecretShowReport = onSecretShowReport,
                     demoMode = demoMode,
@@ -370,11 +394,13 @@ private fun MainScreenWide(
                     modifier = Modifier.weight(1f),
                     graphModifier = Modifier.fillMaxWidth().weight(1f),
                 )
-                OffsetCard(
-                    offsetC = uiState.pendingThermoblockOffsetC ?: machine.thermoblockOffsetC,
-                    manualActive = machine.thermoblockManual,
+                ProfileCard(
+                    selected = selectedProfile,
                     enabled = connected,
-                    onOffsetChanged = onOffsetChanged,
+                    running = machine.brewing,
+                    elapsedSec = machine.profileElapsedSec,
+                    onSelect = onProfileSelected,
+                    onRunToggle = onProfileBrewToggle,
                 )
             }
         }
@@ -449,11 +475,21 @@ private fun HeaderBar(
         Row(verticalAlignment = Alignment.CenterVertically) {
             // Ranking + library read the local Room database, so they stay
             // reachable whether or not a machine is connected.
-            IconButton(onClick = onOpenRanking) {
-                Icon(Icons.Filled.EmojiEvents, contentDescription = "Shot ranking", tint = EssoOrange)
+            TextButton(onClick = onOpenRanking, colors = ButtonDefaults.textButtonColors(contentColor = EssoOrange)) {
+                Icon(
+                    imageVector = MdiCoffeeToGoOutline,
+                    contentDescription = null,
+                    // The to-go cup glyph faces left by default; flip it so the
+                    // spout points the same direction the icon reads (→ text).
+                    modifier = Modifier.size(20.dp).graphicsLayer(scaleX = -1f),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("recent brews")
             }
-            IconButton(onClick = onOpenLibrary) {
-                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "Coffee library", tint = EssoOrange)
+            TextButton(onClick = onOpenLibrary, colors = ButtonDefaults.textButtonColors(contentColor = EssoOrange)) {
+                Icon(imageVector = MdiCoffeeMakerOutline, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("recipes")
             }
             Spacer(Modifier.width(30.dp))
             // Single connect/disconnect icon. Tapping toggles the link; the
@@ -477,6 +513,27 @@ private fun HeaderBar(
     }
 }
 
+// The two temperature targets (group, thermoblock) are reactively linked and
+// exactly one is the "auto" (derived) side at any time. In the default
+// relational mode the operator drives the group and the thermoblock auto-tracks
+// group + offset; when a manual thermoblock override is active the roles invert
+// and the group figure becomes a live estimate (block − offset). Whichever side
+// is derived reads off the other plus/minus the currently dialled offset, so it
+// keeps tracking both inputs instead of showing a stale number.
+private fun resolvedGroupTargetC(machine: MachineState): Float =
+    if (machine.thermoblockManual) {
+        machine.thermoblockSetpointC - machine.thermoblockOffsetC
+    } else {
+        machine.groupSetpointC
+    }
+
+private fun resolvedBlockTargetC(machine: MachineState): Float =
+    if (machine.thermoblockManual) {
+        machine.thermoblockSetpointC
+    } else {
+        machine.groupSetpointC + machine.thermoblockOffsetC
+    }
+
 @Composable
 private fun TemperaturesCard(
     machine: MachineState,
@@ -484,12 +541,18 @@ private fun TemperaturesCard(
     onHeaterToggle: (Boolean) -> Unit,
     onSetGroupTarget: (Float) -> Unit,
     onSetThermoblockTarget: (Float) -> Unit,
+    onSetPressureTarget: (Float) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     // Tighter than the default 20 dp box: 5 dp off the top, 7 dp off the
     // bottom, shrinking the card's dead space around the readouts/heater row.
+    // When the caller stretches the card (wide layout), the readouts stay at the
+    // top and the heater row settles against the bottom edge.
     FrostCard(
+        modifier = modifier,
         accent = true,
         contentPadding = PaddingValues(start = 20.dp, top = 15.dp, end = 20.dp, bottom = 13.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
     ) {
         // Group / Pressure (centre column) / Thermoblock in a single row. The
         // pressure column collapses to fixed non-numeric text before the first
@@ -499,24 +562,40 @@ private fun TemperaturesCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Group is the operator-set master by default and becomes the
+            // derived "auto" estimate (block − offset) once a manual thermoblock
+            // override takes over; the block mirrors it.
+            val groupTarget = resolvedGroupTargetC(machine)
+            val blockTarget = resolvedBlockTargetC(machine)
             TempReadout(
                 label = "Group / portafilter",
                 value = machine.groupTempC,
-                target = machine.groupSetpointC,
-                emphasised = true,
+                target = groupTarget,
                 degraded = !machine.groupSensorOk,
                 onPick = if (enabled) onSetGroupTarget else null,
-                pickInitial = machine.groupSetpointC,
+                pickInitial = groupTarget,
+                resetValue = DEFAULT_GROUP_TEMP_C,
+                autoActive = machine.thermoblockManual,
+                ovrActive = !machine.thermoblockManual,
             )
-            PressureReadout(machine.pressureBar)
+            PressureReadout(
+                pressureBar = machine.pressureBar,
+                setpointBar = machine.pressureSetpointBar,
+                manual = machine.pressureManual,
+                onPick = if (enabled) onSetPressureTarget else null,
+            )
             TempReadout(
                 label = "Thermoblock",
                 value = machine.thermoblockTempC,
-                target = machine.thermoblockSetpointC,
-                emphasised = false,
+                target = blockTarget,
                 degraded = false,
                 onPick = if (enabled) onSetThermoblockTarget else null,
-                pickInitial = machine.thermoblockSetpointC,
+                pickInitial = blockTarget,
+                // 0 °C is the client's sentinel for "clear the manual thermoblock
+                // override", returning it to group setpoint + offset.
+                resetValue = 0f,
+                autoActive = !machine.thermoblockManual,
+                ovrActive = machine.thermoblockManual,
             )
         }
         // Pulled tighter (was 14 dp) so the card is shorter and the four
@@ -584,10 +663,24 @@ private fun TempReadout(
     label: String,
     value: Float,
     target: Float,
-    emphasised: Boolean,
     degraded: Boolean,
     onPick: ((Float) -> Unit)? = null,
     pickInitial: Float = target,
+    resetValue: Float? = null,
+    // Exactly one of these is set per readout: `autoActive` marks the derived
+    // side (green "auto"), `ovrActive` marks the operator-set side (orange
+    // "OVR"). Which is which flips with the manual-thermoblock mode.
+    autoActive: Boolean = false,
+    ovrActive: Boolean = false,
+    // Defaults describe a temperature readout; the pressure readout overrides
+    // them so both sensors share one tap-to-set pattern.
+    format: (Float) -> String = ::formatTemp,
+    wheelValues: List<Float> = TEMP_WHEEL_VALUES,
+    // The wheel keeps a decimal so its half-steps stay distinguishable, which
+    // the rounded readout format would collapse.
+    wheelFormat: (Float) -> String = { "%.1f °C".format(it) },
+    resetLabel: String = "Reset temp override",
+    alignment: Alignment.Horizontal = Alignment.Start,
 ) {
     var picking by remember { mutableStateOf(false) }
     Box {
@@ -597,52 +690,87 @@ private fun TempReadout(
             } else {
                 Modifier
             },
+            horizontalAlignment = alignment,
         ) {
             sectionLabel(label)
             Spacer(Modifier.height(2.dp))
             Text(
-                text = formatTemp(value),
-                style = if (emphasised) MaterialTheme.typography.displaySmall else MaterialTheme.typography.headlineMedium,
+                text = format(value),
+                style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = if (degraded) EssoOnSurfaceMuted else EssoOnSurface,
             )
-            Text(
-                text = "→ ${formatTemp(target)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = if (onPick != null) EssoOrange else EssoOnSurfaceMuted,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "→ ${format(target)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = when {
+                        autoActive -> EssoGreen
+                        onPick != null -> EssoOrange
+                        else -> EssoOnSurfaceMuted
+                    },
+                )
+                if (autoActive || ovrActive) {
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = if (autoActive) "AUTO" else "FIXED",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (autoActive) EssoGreen else EssoOrange,
+                    )
+                }
+            }
         }
         if (picking && onPick != null) {
             TempWheelPopup(
                 title = label,
                 initial = pickInitial,
+                values = wheelValues,
+                format = wheelFormat,
+                resetLabel = resetLabel,
                 onDismiss = { picking = false },
                 onConfirm = {
                     picking = false
                     onPick(it)
                 },
+                onReset = resetValue?.let { rv -> { picking = false; onPick(rv) } },
             )
         }
     }
 }
 
-// Direct-set wheel: a spinning column of 80.0…100.0 °C values (0.5 steps) shown
+// Direct-set wheel: a spinning column of 88.0…140.0 °C values (0.5 steps) shown
 // in a popover anchored under the tapped readout. The centred value is the
 // selection; "Set" commits it. This bypasses the brew-target slider / offset
 // slider so the operator can dial a sensor's target straight from its number.
 private val TEMP_WHEEL_VALUES: List<Float> =
-    generateSequence(80f) { it + 0.5f }.takeWhile { it <= 100.001f }.toList()
+    generateSequence(88f) { it + 0.5f }.takeWhile { it <= 140.001f }.toList()
+
+// Brew-pressure wheel. Capped at the top of the measured pump curve (see
+// kMaxManualPressureBar in the firmware), since the pump cannot hold more.
+private val PRESSURE_WHEEL_VALUES: List<Float> =
+    generateSequence(1f) { it + 0.5f }.takeWhile { it <= 12.001f }.toList()
+
+// Falls back to the machine profile's default brew temperature (see
+// firmware defaultBrewTempC) when the operator resets the group dial.
+private const val DEFAULT_GROUP_TEMP_C = 93f
+
+// Seeds the pressure wheel when no hold is set yet.
+private const val DEFAULT_PRESSURE_BAR = 9f
 
 @Composable
 private fun TempWheelPopup(
     title: String,
     initial: Float,
+    values: List<Float>,
+    format: (Float) -> String,
+    resetLabel: String,
     onDismiss: () -> Unit,
     onConfirm: (Float) -> Unit,
+    onReset: (() -> Unit)? = null,
 ) {
     val itemHeight = 44.dp
     val visibleCount = 5
-    val values = TEMP_WHEEL_VALUES
     val initialIndex = values
         .indexOfFirst { abs(it - initial) < 0.25f }
         .let { if (it < 0) values.indexOfFirst { v -> abs(v - initial) <= 0.5f }.coerceAtLeast(0) else it }
@@ -673,6 +801,17 @@ private fun TempWheelPopup(
                 .padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            if (onReset != null) {
+                Text(
+                    text = resetLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    textDecoration = TextDecoration.Underline,
+                    color = EssoOrange,
+                    modifier = Modifier.clickable(onClick = onReset),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
             Text(
                 text = title,
                 style = MaterialTheme.typography.labelSmall,
@@ -710,7 +849,7 @@ private fun TempWheelPopup(
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
-                                text = "%.1f °C".format(v),
+                                text = format(v),
                                 style = if (isCenter) {
                                     MaterialTheme.typography.titleLarge
                                 } else {
@@ -736,21 +875,37 @@ private fun TempWheelPopup(
     }
 }
 
+// Live brew pressure, settable the same way the two temperatures are: tapping
+// it dials a fixed pressure the shot then holds (FIXED), and resetting hands
+// the shot back to the selected profile (AUTO). There is no derived target to
+// show in AUTO, since the profile varies pressure across the shot.
 @Composable
-private fun PressureReadout(pressureBar: Float) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        sectionLabel("Pressure")
-        Spacer(Modifier.height(2.dp))
-        val label = if (pressureBar.isNaN()) "—" else "%.1f bar".format(pressureBar)
-        Text(
-            text = label,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = EssoOnSurface,
-            textAlign = TextAlign.Center,
-        )
-    }
+private fun PressureReadout(
+    pressureBar: Float,
+    setpointBar: Float,
+    manual: Boolean,
+    onPick: ((Float) -> Unit)?,
+) {
+    TempReadout(
+        label = "Pressure",
+        value = pressureBar,
+        target = if (manual) setpointBar else Float.NaN,
+        degraded = false,
+        onPick = onPick,
+        pickInitial = if (manual && !setpointBar.isNaN()) setpointBar else DEFAULT_PRESSURE_BAR,
+        resetValue = 0f,
+        autoActive = !manual,
+        ovrActive = manual,
+        format = ::formatBar,
+        wheelValues = PRESSURE_WHEEL_VALUES,
+        wheelFormat = { "%.1f bar".format(it) },
+        resetLabel = "Reset pressure hold",
+        alignment = Alignment.CenterHorizontally,
+    )
 }
+
+private fun formatBar(bar: Float): String =
+    if (bar.isNaN()) "— bar" else "%.1f bar".format(bar)
 
 @Composable
 private fun ShotCard(
@@ -758,10 +913,12 @@ private fun ShotCard(
     enabled: Boolean,
     setpoint: Float,
     preinfusionSec: Float,
+    pumpRampSec: Float,
     displayShotTimeMs: Long,
     onBrewToggle: (Boolean) -> Unit,
     onApplySetpoint: (Float) -> Unit,
     onPreinfusionChanged: (Float) -> Unit,
+    onPumpRampChanged: (Float) -> Unit,
     onFlush: () -> Unit,
     onSecretShowReport: () -> Unit,
     demoMode: Boolean,
@@ -784,7 +941,7 @@ private fun ShotCard(
             verticalAlignment = Alignment.Top,
         ) {
             Column {
-                sectionLabel("Shot timer")
+                sectionLabel("Brew timer")
                 Text(
                     text = formatShot(displayShotTimeMs),
                     style = MaterialTheme.typography.displaySmall,
@@ -799,60 +956,74 @@ private fun ShotCard(
                     }
                 Text(text = src, style = MaterialTheme.typography.labelSmall, color = EssoOnSurfaceMuted)
             }
-            Column(
-                modifier = Modifier.width(IntrinsicSize.Max),
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top,
             ) {
-                val onStartSecretTap = rememberTripleTap(onSecretShowReport)
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    Button(
-                        onClick = { onBrewToggle(!running) },
-                        enabled = enabled,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors =
-                            if (running) {
-                                ButtonDefaults.buttonColors(containerColor = EssoError)
-                            } else {
-                                ButtonDefaults.buttonColors(containerColor = EssoOrange)
-                            },
-                    ) {
-                        Text(if (running) "Stop" else "Start shot")
-                    }
-                    // Reveal the demo report via a transparent triple-tap target
-                    // whenever the button carries no real function: offline (it
-                    // is disabled) or in demo mode (brew control is a no-op).
-                    if (!enabled || demoMode) {
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = onStartSecretTap,
-                                ),
-                        )
-                    }
-                }
-                OutlinedButton(
-                    onClick = onFlush,
-                    enabled = enabled && !running,
-                    modifier = Modifier.fillMaxWidth(),
+                // Pre-infusion selector sits directly to the left of Start brew.
+                PreinfusionDropdown(
+                    seconds = preinfusionSec,
+                    enabled = enabled,
+                    onChange = onPreinfusionChanged,
+                )
+                Column(
+                    modifier = Modifier.width(IntrinsicSize.Max),
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Icon(
-                        Icons.Filled.WaterDrop,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.padding(3.dp))
-                    Text(if (machine.flushing) "Flushing…" else "Flush 3 s")
+                    val onStartSecretTap = rememberTripleTap(onSecretShowReport)
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = { onBrewToggle(!running) },
+                            enabled = enabled,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors =
+                                if (running) {
+                                    ButtonDefaults.buttonColors(containerColor = EssoError)
+                                } else {
+                                    ButtonDefaults.buttonColors(containerColor = EssoOrange)
+                                },
+                        ) {
+                            Text(if (running) "Stop" else "Manual brew")
+                        }
+                        // Reveal the demo report via a transparent triple-tap
+                        // target whenever the button carries no real function:
+                        // offline (disabled) or in demo mode (brew is a no-op).
+                        if (!enabled || demoMode) {
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = onStartSecretTap,
+                                    ),
+                            )
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = onFlush,
+                        enabled = enabled && !running,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            Icons.Filled.WaterDrop,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.padding(3.dp))
+                        Text(if (machine.flushing) "Flushing…" else "Flush 3 s")
+                    }
                 }
             }
         }
 
-        PreinfusionChips(seconds = preinfusionSec, enabled = enabled, onChange = onPreinfusionChanged)
+        Spacer(Modifier.height(4.dp))
+        // Pump pressure-ramp (soft start) — sits above the brew target so the
+        // two brew-shaping sliders read top-to-bottom.
+        PumpRampSlider(seconds = pumpRampSec, enabled = enabled, onChange = onPumpRampChanged)
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -875,12 +1046,12 @@ private fun ShotCard(
                 enabled = enabled,
                 valueRange = 80f..110f,
                 steps = 29,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).height(COMPACT_SLIDER_HEIGHT),
             )
             FilledIconButton(
                 onClick = { onApplySetpoint(draft) },
                 enabled = enabled && changed,
-                modifier = Modifier.size(40.dp).alpha(if (enabled && changed) 1f else 0.4f),
+                modifier = Modifier.size(36.dp).alpha(if (enabled && changed) 1f else 0.4f),
                 colors =
                     IconButtonDefaults.filledIconButtonColors(
                         containerColor = EssoOrange,
@@ -895,202 +1066,204 @@ private fun ShotCard(
     }
 }
 
+// Compact pre-infusion picker (0–7 s) shown left of the Start brew button.
 @Composable
-private fun PreinfusionChips(seconds: Float, enabled: Boolean, onChange: (Float) -> Unit) {
-    val selected = seconds.roundToInt().takeIf { it in 0..7 }
+private fun PreinfusionDropdown(seconds: Float, enabled: Boolean, onChange: (Float) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val current = seconds.roundToInt().coerceIn(0, 7)
     Column {
-        sectionLabel("Pre-infusion (s)")
+        sectionLabel("Pre-infusion")
         Spacer(Modifier.height(4.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            for (s in 0..7) {
-                FilterChip(
-                    selected = selected == s,
-                    onClick = { onChange(s.toFloat()) },
-                    enabled = enabled,
-                    label = { Text("$s") },
-                    modifier = Modifier.weight(1f),
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = EssoOrange.copy(alpha = 0.25f),
-                        selectedLabelColor = EssoOrange,
-                    ),
+        Box {
+            OutlinedButton(
+                onClick = { expanded = true },
+                enabled = enabled,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Text("$current s")
+                Icon(
+                    Icons.Filled.ArrowDropDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
                 )
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                for (s in 0..7) {
+                    DropdownMenuItem(
+                        text = { Text("$s s") },
+                        onClick = {
+                            onChange(s.toFloat())
+                            expanded = false
+                        },
+                    )
+                }
             }
         }
     }
 }
 
+// Soft-start pressure-ramp slider (0–10 s). 0 = off (full pressure at once).
+// Applies on release like the offset slider — no separate confirm button.
 @Composable
-private fun OffsetCard(
-    offsetC: Float,
-    manualActive: Boolean,
-    enabled: Boolean,
-    onOffsetChanged: (Float) -> Unit,
-) {
-    var draft by remember(offsetC) { mutableFloatStateOf(offsetC) }
-    val context = LocalContext.current
-    val presetStore = remember { OffsetPresetStore(context) }
-    val presets = remember { mutableStateOf(presetStore.load()) }
-    var selectedPreset by remember { mutableIntStateOf(-1) }
-    // Bumped each time a preset is saved to trigger the pulse animation on
-    // the corresponding PresetChip. The chip watches this + the slot index so
-    // it only pulses when *its* slot was saved.
-    var savedTick by remember { mutableIntStateOf(0) }
-    var lastSavedSlot by remember { mutableIntStateOf(-1) }
-
-    FrostCard {
+private fun PumpRampSlider(seconds: Float, enabled: Boolean, onChange: (Float) -> Unit) {
+    var draft by remember(seconds) { mutableFloatStateOf(seconds) }
+    Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            sectionLabel("Thermoblock offset")
+            sectionLabel("Pressure ramp")
             Text(
-                text = formatOffset(draft),
+                text = if (draft < 0.05f) "Off" else "${"%.1f".format(draft)} s",
                 style = MaterialTheme.typography.titleMedium,
-                color = EssoOrange,
                 fontWeight = FontWeight.Bold,
+                color = if (draft < 0.05f) EssoOnSurfaceMuted else EssoOrange,
             )
         }
         Slider(
             value = draft,
-            onValueChange = {
-                val q = (it * 2).roundToInt() / 2f  // 0.5 °C step
-                if (q != draft) selectedPreset = -1
-                draft = q
-            },
-            onValueChangeFinished = { onOffsetChanged(draft) },
+            onValueChange = { draft = (it * 2).roundToInt() / 2f },  // 0.5 s step
+            onValueChangeFinished = { onChange(draft) },
             enabled = enabled,
-            valueRange = -20f..20f,
-            steps = 79,
+            valueRange = 0f..10f,
+            steps = 19,
+            modifier = Modifier.height(COMPACT_SLIDER_HEIGHT),
         )
-        Spacer(Modifier.height(10.dp))
-        // Long-press any chip to overwrite it with the current slider value.
-        // Tap = select and apply. The save button was dropped in favour of the
-        // long-press because it clutters the row and adds a required extra tap
-        // (select → save) for something the operator only does occasionally.
+    }
+}
+
+// Material3 sliders reserve a 48 dp touch row. The shot card needs the vertical
+// space more than the padding, so both of its sliders run shorter to leave room
+// for the readouts card above.
+private val COMPACT_SLIDER_HEIGHT = 28.dp
+
+// Replaces the old thermoblock-offset card. Lets the operator pick a bundled
+// espresso pressure/flow profile (sourced from gaggimate + gaggiuino) or
+// "None". The dropdown sits on the left with the profile's temperature +
+// description; the ProfileGraph on the right illustrates the target
+// pressure/flow shape. Selecting writes the profile to the firmware, which
+// executes it by duty-cycling the pump (see MainViewModel.applyBrewProfile).
+@Composable
+private fun ProfileCard(
+    selected: BrewProfile?,
+    enabled: Boolean,
+    running: Boolean,
+    elapsedSec: Float,
+    onSelect: (BrewProfile?) -> Unit,
+    onRunToggle: (Boolean) -> Unit,
+) {
+    FrostCard {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            for (i in 0 until OffsetPresetStore.SLOTS) {
-                PresetChip(
-                    label = "${i + 1}",
-                    selected = selectedPreset == i,
-                    enabled = enabled,
-                    pulseKey = if (lastSavedSlot == i) savedTick else 0,
-                    modifier = Modifier.weight(1f),
-                    onTap = {
-                        selectedPreset = i
-                        val v = presets.value[i]
-                        draft = v
-                        onOffsetChanged(v)
-                    },
-                    onLongPress = {
-                        val next = presets.value.copyOf()
-                        next[i] = draft
-                        presets.value = next
-                        presetStore.save(next)
-                        selectedPreset = i
-                        lastSavedSlot = i
-                        savedTick += 1  // re-triggers the chip's pulse
+            sectionLabel("Pressure profile")
+            if (selected != null) {
+                Text(
+                    text = "${selected.temperatureC.roundToInt()} °C · ${selected.phases.size} phases",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = EssoOrange,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            // Profile shots are pulled from here; the shot card's button always
+            // runs the plain pre-infusion + ramp pull instead.
+            Button(
+                onClick = { onRunToggle(!running) },
+                enabled = enabled && (running || selected != null),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                colors = if (running) {
+                    ButtonDefaults.buttonColors(containerColor = EssoError)
+                } else {
+                    ButtonDefaults.buttonColors(containerColor = EssoOrange)
+                },
+            ) {
+                if (!running) {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.padding(2.dp))
+                }
+                Text(if (running) "Stop" else "Run")
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().height(132.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(0.42f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ProfileDropdown(selected = selected, enabled = enabled, onSelect = onSelect)
+                Text(
+                    text = selected?.description
+                        ?: "None — the shot runs on the pre-infusion + pressure-ramp settings above.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = EssoOnSurfaceMuted,
+                )
+            }
+            Column(
+                modifier = Modifier.weight(0.58f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                ProfileGraph(
+                    profile = selected,
+                    modifier = Modifier.fillMaxWidth().height(104.dp),
+                    elapsedSec = elapsedSec,
+                )
+                if (selected != null) ProfileGraphLegend()
+            }
+        }
+    }
+}
+
+// "None" + every bundled profile as "name (source)". Selecting null clears the
+// profile (back to the plain shot behaviour).
+@Composable
+private fun ProfileDropdown(
+    selected: BrewProfile?,
+    enabled: Boolean,
+    onSelect: (BrewProfile?) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(
+            onClick = { expanded = true },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            Text(
+                text = selected?.displayName ?: "None",
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+            )
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(20.dp))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("None") },
+                onClick = {
+                    onSelect(null)
+                    expanded = false
+                },
+            )
+            for (profile in BrewProfileLibrary.profiles) {
+                DropdownMenuItem(
+                    text = { Text(profile.displayName) },
+                    onClick = {
+                        onSelect(profile)
+                        expanded = false
                     },
                 )
             }
         }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = if (manualActive) {
-                "A manual thermoblock temperature is active — move this slider to " +
-                    "return to group setpoint + offset."
-            } else {
-                "Signed °C added to the thermoblock setpoint. " +
-                    "Tap a preset to apply · long-press to save the current value."
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = if (manualActive) EssoOrange else EssoOnSurfaceMuted,
-        )
-    }
-
-    LaunchedEffect(offsetC, presets.value) {
-        if (selectedPreset < 0) {
-            val idx = presets.value.indexOfFirst { abs(it - offsetC) < 0.05f }
-            if (idx >= 0) selectedPreset = idx
-        }
-    }
-}
-
-// Custom chip built on Box so we can combine tap + long-press cleanly (the
-// M3 FilterChip's own onClick swallows the long-press we need). The pulse
-// animation scales the chip up briefly whenever `pulseKey` changes to a
-// non-zero value — the parent bumps that counter every time this slot is
-// saved to a preset, and the chip runs a short scale-up/scale-down as an
-// explicit "saved" acknowledgement.
-@OptIn(ExperimentalComposeUiApi::class)
-@Composable
-private fun PresetChip(
-    label: String,
-    selected: Boolean,
-    enabled: Boolean,
-    pulseKey: Int,
-    modifier: Modifier = Modifier,
-    onTap: () -> Unit,
-    onLongPress: () -> Unit,
-) {
-    val scale = remember { Animatable(1f) }
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(pulseKey) {
-        if (pulseKey > 0) {
-            scope.launch {
-                // Snappy pulse: up in ~120 ms, settle back over 260 ms. Fast
-                // enough to feel like a tactile confirmation, slow enough to
-                // read as intentional feedback rather than a flicker.
-                scale.animateTo(1.18f, tween(durationMillis = 120))
-                scale.animateTo(1.0f, tween(durationMillis = 260))
-            }
-        }
-    }
-    val bg = if (selected) EssoOrange.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.05f)
-    val borderColor = if (selected) EssoOrange.copy(alpha = 0.60f) else Color.White.copy(alpha = 0.14f)
-    val labelColor = if (selected) EssoOrange else EssoOnSurface
-    Box(
-        modifier = modifier
-            // Match the M3 FilterChip height used by the pre-infusion row so
-            // the two chip rows read as the same control size.
-            .height(32.dp)
-            .graphicsLayer(scaleX = scale.value, scaleY = scale.value)
-            .alpha(if (enabled) 1f else 0.4f)
-            .clip(RoundedCornerShape(12.dp))
-            .background(bg)
-            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
-            .combinedClickable(enabled = enabled, onClick = onTap, onLongClick = onLongPress),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            color = labelColor,
-            fontWeight = FontWeight.SemiBold,
-            style = MaterialTheme.typography.labelLarge,
-        )
-    }
-}
-
-private class OffsetPresetStore(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-
-    fun load(): FloatArray = FloatArray(SLOTS) { prefs.getFloat("$KEY_PREFIX$it", 0f) }
-
-    fun save(values: FloatArray) {
-        prefs.edit().apply {
-            for (i in 0 until SLOTS) putFloat("$KEY_PREFIX$i", values.getOrElse(i) { 0f })
-        }.apply()
-    }
-
-    companion object {
-        const val SLOTS = 5
-        private const val PREFS = "esso_offset_presets"
-        private const val KEY_PREFIX = "slot_"
     }
 }
 
@@ -1110,6 +1283,7 @@ private fun GraphCard(
         BrewGraph(
             history = history,
             modifier = graphModifier,
+            interactive = true,
         )
         Spacer(Modifier.height(10.dp))
         GraphLegend()
@@ -1142,11 +1316,6 @@ private fun rememberTripleTap(onTriple: () -> Unit): () -> Unit {
 
 private fun formatTemp(celsius: Float): String =
     if (celsius.isNaN()) "— °C" else "${celsius.roundToInt()} °C"
-
-private fun formatOffset(offsetC: Float): String {
-    val sign = if (offsetC >= 0f) "+" else ""
-    return "$sign%.1f °C".format(offsetC)
-}
 
 private fun formatShot(ms: Long): String {
     val totalSec = ms / 1000

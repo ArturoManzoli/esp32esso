@@ -1,5 +1,6 @@
 package com.esp32esso.tier1.ui
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -22,8 +23,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -60,6 +63,7 @@ import com.esp32esso.tier1.data.GrinderEntity
 import com.esp32esso.tier1.data.RecipeEntity
 import com.esp32esso.tier1.data.ShotEntity
 import com.esp32esso.tier1.data.WaterEntity
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // Post-shot detail sheet.
@@ -71,8 +75,14 @@ import kotlinx.coroutines.launch
 //
 // Read-only flow (`readOnly = true`): opened from the ranking card; the saved
 // `initialShot` prefills every field, autosave is skipped, and every input +
-// the Save/Delete controls are hidden or disabled. The user can still share
-// the report as an image via the top bar action.
+// the Save control is hidden or disabled by default. A pencil icon in the top
+// bar lifts that lock for the rest of this screen visit (`editing`), revealing
+// the same inputs and Save control the new-shot flow uses so a past report can
+// be corrected. Saving in that case keeps the shot's original `savedAtEpochMs`
+// (see buildEntity) so fixing a typo days later doesn't reshuffle the ranking
+// list or relabel when the brew actually happened. The user can still share
+// the report as an image, or delete it outright, via the top bar actions — the
+// ranking card itself carries no per-row actions anymore.
 @Composable
 fun ShotReportScreen(
     report: ShotReport,
@@ -111,6 +121,24 @@ fun ShotReportScreen(
     var brewName by remember(initialShot?.id) { mutableStateOf(initialShot?.name.orEmpty()) }
     var renamingBrew by remember { mutableStateOf(false) }
 
+    // Lifts the read-only lock for the rest of this screen visit once the
+    // operator taps the pencil (see the top bar below). Irrelevant outside the
+    // read-only flow, where every input is already editable.
+    var editing by remember(initialShot?.id) { mutableStateOf(false) }
+    val editable = !readOnly || editing
+
+    // Tracks whether any field has changed since the last successful save, so
+    // the header's quick-save icon can flag unsaved edits in orange. `justSaved`
+    // drives a transient floppy → check animation right after a save lands.
+    var dirty by remember(initialShot?.id) { mutableStateOf(false) }
+    var justSaved by remember(initialShot?.id) { mutableStateOf(false) }
+    LaunchedEffect(justSaved) {
+        if (justSaved) {
+            delay(1400)
+            justSaved = false
+        }
+    }
+
     // A single sheet target drives the inline "+" flow; whichever selector's
     // plus icon the user tapped decides which form the sheet shows.
     var sheetTarget by remember { mutableStateOf<SheetTarget?>(null) }
@@ -145,6 +173,38 @@ fun ShotReportScreen(
         ) {
             val shareLayer = rememberGraphicsLayer()
             val context = LocalContext.current
+            val performSave: () -> Unit = save@{
+                val id = shotId
+                if (id == null) {
+                    scope.launch { snackbar.showSnackbar("Still saving…") }
+                    return@save
+                }
+                onSave(
+                    buildEntity(
+                        id = id,
+                        // Editing an already-saved report keeps its original
+                        // save date; only a brand-new shot gets "now".
+                        savedAtEpochMs = initialShot?.savedAtEpochMs ?: System.currentTimeMillis(),
+                        report = report,
+                        name = brewName,
+                        beanId = beanId,
+                        grinderId = grinderId,
+                        waterId = waterId,
+                        recipeId = recipeId,
+                        grinderSetting = grinderSetting,
+                        doseG = doseG.toFloatOrNull(),
+                        notes = notes,
+                        bitterness = bitterness,
+                        acidity = acidity,
+                        body = body,
+                        visuals = visuals,
+                        overall = overall,
+                    ),
+                )
+                dirty = false
+                justSaved = true
+                scope.launch { snackbar.showSnackbar("Brew saved") }
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth(),
@@ -153,30 +213,53 @@ fun ShotReportScreen(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = EssoOrange)
                 }
                 Text(
-                    text = if (readOnly) "Brew report · view" else "Brew report",
+                    text = when {
+                        !readOnly -> "Brew report"
+                        editing -> "Brew report · editing"
+                        else -> "Brew report · view"
+                    },
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
+                if (readOnly && !editing) {
+                    IconButton(onClick = { editing = true }) {
+                        Icon(Icons.Filled.Edit, contentDescription = "Edit brew report", tint = EssoOrange)
+                    }
+                }
+                if (editable) {
+                    IconButton(onClick = performSave) {
+                        Crossfade(targetState = justSaved, label = "saveIcon") { saved ->
+                            if (saved) {
+                                Icon(Icons.Filled.Check, contentDescription = "Saved", tint = EssoGreen)
+                            } else {
+                                Icon(
+                                    Icons.Filled.Save,
+                                    contentDescription = "Save brew",
+                                    tint = if (dirty) EssoOrange else EssoOnSurfaceMuted,
+                                )
+                            }
+                        }
+                    }
+                }
                 IconButton(onClick = {
                     shareLayerAsImage(context, scope, shareLayer, "Brew report")
                 }) {
                     Icon(Icons.Filled.Share, contentDescription = "Share", tint = EssoOrange)
                 }
-                // The delete affordance is only meaningful in edit mode — the
-                // library-open flow uses ranking's own delete for removal.
-                if (!readOnly) {
-                    IconButton(onClick = {
-                        onDelete()
-                        scope.launch { snackbar.showSnackbar("Shot discarded") }
-                    }) {
-                        Icon(
-                            Icons.Filled.DeleteOutline,
-                            contentDescription = "Delete shot",
-                            tint = EssoOrange,
-                            modifier = Modifier.size(26.dp),
-                        )
-                    }
+                // Available in both modes now — the ranking card dropped its
+                // own delete/share row, so this is the only place left to
+                // remove a saved brew.
+                IconButton(onClick = {
+                    onDelete()
+                    scope.launch { snackbar.showSnackbar("Brew discarded") }
+                }) {
+                    Icon(
+                        Icons.Filled.DeleteOutline,
+                        contentDescription = "Delete brew",
+                        tint = EssoOrange,
+                        modifier = Modifier.size(26.dp),
+                    )
                 }
             }
 
@@ -235,7 +318,7 @@ fun ShotReportScreen(
                                 .combinedClickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
-                                    enabled = !readOnly,
+                                    enabled = editable,
                                     onClick = {},
                                     onDoubleClick = { renamingBrew = true },
                                 ),
@@ -247,7 +330,7 @@ fun ShotReportScreen(
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                             )
-                            if (!readOnly) {
+                            if (editable) {
                                 IconButton(
                                     onClick = { renamingBrew = true },
                                     modifier = Modifier.size(28.dp),
@@ -265,7 +348,7 @@ fun ShotReportScreen(
                         // Passing onChange = null makes the row decorative, which is
                         // what we want in read-only mode.
                         val setter: (String) -> ((Int) -> Unit)? = { axis ->
-                            if (readOnly) null else { it: Int ->
+                            if (!editable) null else { it: Int ->
                                 when (axis) {
                                     "Bitterness" -> bitterness = it
                                     "Acidity" -> acidity = it
@@ -273,6 +356,7 @@ fun ShotReportScreen(
                                     "Visuals" -> visuals = it
                                     "Overall" -> overall = it
                                 }
+                                dirty = true
                             }
                         }
                         StarRow("Bitterness", bitterness, onChange = setter("Bitterness"))
@@ -290,6 +374,7 @@ fun ShotReportScreen(
                         history = report.samples,
                         modifier = Modifier.fillMaxWidth().height(240.dp),
                         shotWindow = shotWindow,
+                        interactive = true,
                     )
                     Spacer(Modifier.height(10.dp))
                     GraphLegend()
@@ -308,17 +393,17 @@ fun ShotReportScreen(
                         label = "Bean",
                         options = beans.map { it.id to it.name },
                         selectedId = beanId,
-                        onSelected = { beanId = it },
+                        onSelected = { beanId = it; dirty = true },
                         onAdd = { sheetTarget = SheetTarget.AddBean },
-                        enabled = !readOnly,
+                        enabled = editable,
                     )
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(
                         value = doseG,
-                        onValueChange = { doseG = it },
+                        onValueChange = { doseG = it; dirty = true },
                         label = { Text("Coffee dose (g)") },
                         singleLine = true,
-                        enabled = !readOnly,
+                        enabled = editable,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -327,9 +412,9 @@ fun ShotReportScreen(
                         label = "Water",
                         options = waters.map { it.id to it.name },
                         selectedId = waterId,
-                        onSelected = { waterId = it },
+                        onSelected = { waterId = it; dirty = true },
                         onAdd = { sheetTarget = SheetTarget.AddWater },
-                        enabled = !readOnly,
+                        enabled = editable,
                     )
                 }
 
@@ -340,17 +425,17 @@ fun ShotReportScreen(
                         label = "Grinder",
                         options = grinders.map { it.id to it.name },
                         selectedId = grinderId,
-                        onSelected = { grinderId = it },
+                        onSelected = { grinderId = it; dirty = true },
                         onAdd = { sheetTarget = SheetTarget.AddGrinder },
-                        enabled = !readOnly,
+                        enabled = editable,
                     )
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(
                         value = grinderSetting,
-                        onValueChange = { grinderSetting = it },
+                        onValueChange = { grinderSetting = it; dirty = true },
                         label = { Text("Grinder setting") },
                         singleLine = true,
-                        enabled = !readOnly,
+                        enabled = editable,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -369,9 +454,9 @@ fun ShotReportScreen(
                         label = "Recipe",
                         options = recipes.map { it.id to it.name },
                         selectedId = recipeId,
-                        onSelected = { recipeId = it },
+                        onSelected = { recipeId = it; dirty = true },
                         onAdd = { sheetTarget = SheetTarget.AddRecipe },
-                        enabled = !readOnly,
+                        enabled = editable,
                     )
                     Spacer(Modifier.height(10.dp))
                     // Falls back to the picked recipe's own fields whenever this
@@ -393,48 +478,22 @@ fun ShotReportScreen(
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(
                         value = notes,
-                        onValueChange = { notes = it },
+                        onValueChange = { notes = it; dirty = true },
                         label = { Text("Notes") },
                         minLines = 3,
-                        enabled = !readOnly,
+                        enabled = editable,
                         keyboardOptions = KeyboardOptions.Default,
                         modifier = Modifier.fillMaxWidth().weight(1f),
                     )
                 }
             }
 
-            if (!readOnly) {
+            if (editable) {
                 Button(
-                    onClick = {
-                        val id = shotId
-                        if (id != null) {
-                            onSave(
-                                buildEntity(
-                                    id = id,
-                                    report = report,
-                                    name = brewName,
-                                    beanId = beanId,
-                                    grinderId = grinderId,
-                                    waterId = waterId,
-                                    recipeId = recipeId,
-                                    grinderSetting = grinderSetting,
-                                    doseG = doseG.toFloatOrNull(),
-                                    notes = notes,
-                                    bitterness = bitterness,
-                                    acidity = acidity,
-                                    body = body,
-                                    visuals = visuals,
-                                    overall = overall,
-                                ),
-                            )
-                            scope.launch { snackbar.showSnackbar("Shot saved") }
-                        } else {
-                            scope.launch { snackbar.showSnackbar("Still saving…") }
-                        }
-                    },
+                    onClick = performSave,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = EssoOrange),
-                ) { Text("Save shot") }
+                ) { Text("Save brew") }
             }
         }
       }
@@ -463,6 +522,7 @@ fun ShotReportScreen(
             initial = brewName,
             onConfirm = {
                 brewName = it
+                dirty = true
                 renamingBrew = false
             },
             onDismiss = { renamingBrew = false },
@@ -552,6 +612,7 @@ private fun RecipeSummary(
         SummaryRow("Water", waterName?.takeIf { it.isNotBlank() } ?: "—")
         SummaryRow("Dose", doseG?.let { "%.1f g".format(it) } ?: "—")
         SummaryRow("Brew temp", formatTempC(report.targetC))
+        SummaryRow("Thermoblock offset", formatOffsetC(report.thermoblockOffsetC))
         SummaryRow("Pressure", formatBar(report.avgBar))
         SummaryRow("Pre-infusion", formatSeconds(report.preinfusionSec))
     }
@@ -571,6 +632,7 @@ private fun SummaryRow(label: String, value: String) {
 
 private fun buildEntity(
     id: Long,
+    savedAtEpochMs: Long,
     report: ShotReport,
     name: String,
     beanId: Long?,
@@ -587,7 +649,7 @@ private fun buildEntity(
     overall: Int,
 ): ShotEntity = ShotEntity(
     id = id,
-    savedAtEpochMs = System.currentTimeMillis(),
+    savedAtEpochMs = savedAtEpochMs,
     durationMs = report.durationMs,
     targetC = report.targetC,
     preinfusionSec = report.preinfusionSec,
@@ -596,6 +658,8 @@ private fun buildEntity(
     avgGroupC = report.avgGroupC.takeUnless { it.isNaN() },
     peakGroupC = report.peakGroupC,
     finalGroupC = report.finalGroupC,
+    thermoblockOffsetC = report.thermoblockOffsetC.takeUnless { it.isNaN() },
+    thermoblockManual = report.thermoblockManual,
     name = name,
     beanId = beanId,
     grinderId = grinderId,
@@ -625,6 +689,12 @@ private fun formatBar(value: Float): String =
 
 private fun formatTempC(value: Float): String =
     if (value.isNaN()) "— °C" else "%.1f °C".format(value)
+
+private fun formatOffsetC(value: Float): String {
+    if (value.isNaN()) return "— °C"
+    val sign = if (value >= 0f) "+" else ""
+    return "$sign%.1f °C".format(value)
+}
 
 private fun formatSeconds(value: Float): String =
     if (value <= 0.05f) "off" else "%.1f s".format(value)

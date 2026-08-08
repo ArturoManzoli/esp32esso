@@ -28,11 +28,28 @@ import kotlinx.coroutines.launch
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val client = Tier1BleClient(application)
     private val repo = CoffeeRepository(application)
+    private val profilePrefs =
+        application.getSharedPreferences(PROFILE_PREFS, Application.MODE_PRIVATE)
+
+    // The currently selected brew profile id (null = "None"). Persisted locally
+    // so it survives app restarts, and re-sent to the firmware on every
+    // (re)connect so the two stay in sync even though the firmware also keeps
+    // its own NVS copy for switch-triggered shots.
+    private val _selectedProfileId =
+        MutableStateFlow(profilePrefs.getString(PROFILE_KEY, null))
+    val selectedProfileId: StateFlow<String?> = _selectedProfileId.asStateFlow()
 
     // Offline developer shortcut: when on (and no real machine is linked) the
     // whole UI runs off DemoData's synthetic connected state.
     private val _demoMode = MutableStateFlow(false)
     val demoMode: StateFlow<Boolean> = _demoMode.asStateFlow()
+
+    // True while the currently applied thermoblock offset is one the app
+    // calculated (on a group-target apply) rather than one the operator dialled
+    // or picked from a preset. Drives the offset card's "AUTO" tag / preset
+    // deselection. Any manual offset or block override flips it back to false.
+    private val _offsetAuto = MutableStateFlow(false)
+    val offsetAuto: StateFlow<Boolean> = _offsetAuto.asStateFlow()
 
     // Real BLE state, or the demo stand-in while demo mode is armed offline.
     val uiState: StateFlow<BleUiState> =
@@ -48,6 +65,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _pendingReport = MutableStateFlow<ShotReport?>(null)
     val pendingReport: StateFlow<ShotReport?> = _pendingReport.asStateFlow()
+
+    // Survives dismissing the "Show brew report?" prompt (unlike pendingReport,
+    // which is cleared either way) so the operator can still get to it from the
+    // "Show last brew report" button on the ranking page if they regret not
+    // opening it right away. lastReportShotId tracks whether it has since been
+    // saved: null means "not yet in the library", so the button stays useful;
+    // once it's saved (either by opening the prompt normally or via that
+    // button, see markLastReportSaved) the shot already has its own card in
+    // the recent-brews list, so the button hides itself again.
+    private val _lastReport = MutableStateFlow<ShotReport?>(null)
+    val lastReport: StateFlow<ShotReport?> = _lastReport.asStateFlow()
+    private val _lastReportShotId = MutableStateFlow<Long?>(null)
+    val lastReportShotId: StateFlow<Long?> = _lastReportShotId.asStateFlow()
 
     private var wasBrewing = false
     private var shotStartUptimeMs: Long = 0L
@@ -65,11 +95,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val shots: StateFlow<List<ShotEntity>> =
         repo.shots.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    // Push the selected brew profile once per link, after bring-up is idle.
+    // Writing earlier races Android's single in-flight GATT op against MTU /
+    // CCCD / the config read chain: that used to drop notify enable (Connected
+    // with no telemetry), and even after that fix a mid-chain write returns
+    // false and the profile is lost. pumpRampSec is the last read in the chain,
+    // so once it and MachineState are both set the slot is free.
+    private var profilePushedThisLink = false
+
     init {
         viewModelScope.launch {
             client.uiState.collect { state ->
                 val machine = state.machineState
                 if (machine != null) trackBrew(machine)
+                if (state.phase != ConnectionPhase.Connected) {
+                    profilePushedThisLink = false
+                    return@collect
+                }
+                if (machine != null && state.pumpRampSec != null && !profilePushedThisLink) {
+                    profilePushedThisLink = true
+                    client.writeBrewProfile(BrewProfileLibrary.byId(_selectedProfileId.value))
+                }
             }
         }
     }
@@ -89,19 +135,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val endUptime = machine.uptimeMs
             val preinfusion = client.uiState.value.preinfusionSec ?: 0f
             val target = machine.groupSetpointC
+            val thermoblockOffset = machine.thermoblockOffsetC
+            val thermoblockManual = machine.thermoblockManual
             postShotJob =
                 viewModelScope.launch {
                     delay(POST_SHOT_HOLD_MS)
                     _displayShotTimeMs.value = 0L
-                    _pendingReport.value =
-                        buildReport(
-                            durationMs = heldTime,
-                            startUptime = startUptime,
-                            endUptime = endUptime,
-                            targetC = target,
-                            preinfusionSec = preinfusion,
-                            history = client.uiState.value.history,
-                        )
+                    // Very short "shots" are almost always a mis-tap or an
+                    // aborted start rather than a real pull worth a report, so
+                    // skip building one entirely -- this is also what keeps
+                    // the "Show brew report?" prompt from nagging the operator
+                    // after those.
+                    if (heldTime > MIN_REPORT_DURATION_MS) {
+                        val built =
+                            buildReport(
+                                durationMs = heldTime,
+                                startUptime = startUptime,
+                                endUptime = endUptime,
+                                targetC = target,
+                                preinfusionSec = preinfusion,
+                                thermoblockOffsetC = thermoblockOffset,
+                                thermoblockManual = thermoblockManual,
+                                history = client.uiState.value.history,
+                            )
+                        _pendingReport.value = built
+                        _lastReport.value = built
+                        _lastReportShotId.value = null
+                    }
                 }
         } else if (!brewing && postShotJob == null) {
             // Idle steady state: mirror what the wire reports (usually 0).
@@ -120,6 +180,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return r
     }
 
+    // Records that the last report now has a row of its own in the library,
+    // so the "Show last brew report" shortcut hides itself again.
+    fun markLastReportSaved(id: Long) {
+        _lastReportShotId.value = id
+    }
+
     // Offline dev shortcut #1 (triple-tap the "not connected" header text):
     // arm/disarm the synthetic demo state. No-op while a real machine is linked.
     fun toggleDemoMode() {
@@ -127,22 +193,69 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _demoMode.value = !_demoMode.value
     }
 
-    // Offline dev shortcut #2 (triple-tap the disabled "Start shot" button):
+    // Offline dev shortcut #2 (triple-tap the disabled "Start brew" button):
     // queue a synthetic report so the standard "Show report?" prompt appears.
     // It then flows through the exact post-shot path — editable and auto-saved.
     fun injectDemoReport() {
-        _pendingReport.value = DemoData.report()
+        val report = DemoData.report()
+        _pendingReport.value = report
+        _lastReport.value = report
+        _lastReportShotId.value = null
     }
 
     fun connect() = client.start()
     fun disconnect() = client.disconnect()
-    fun applySetpoint(celsius: Float) = client.writeSetpoint(celsius)
-    fun applyThermoblockOffset(offsetC: Float) = client.writeThermoblockOffset(offsetC)
-    fun applyThermoblockSetpoint(celsius: Float) = client.writeThermoblockSetpoint(celsius)
+
+    // Setting the group target is an explicit override and must always win,
+    // clearing any manual thermoblock override that might still be latched —
+    // previously that clear only happened when calibration history existed,
+    // so with no usable shots yet the block (and the group readout, which
+    // reads off the block while manual is active) stayed stuck on the old
+    // manual figure and the group tap appeared to do nothing. Writing the
+    // offset unconditionally (recalculated when there's history, otherwise
+    // just re-asserting the current offset) always drops the manual flag, so
+    // the group setpoint applied right after always takes effect.
+    fun applySetpoint(celsius: Float) {
+        val calculated = calculatedThermoblockOffsetC()
+        val offsetToApply = calculated ?: client.uiState.value.machineState?.thermoblockOffsetC ?: 0f
+        client.writeThermoblockOffset(offsetToApply)
+        _offsetAuto.value = calculated != null
+        client.writeSetpoint(celsius)
+    }
+
+    // Operator-driven offset (slider or preset tap): no longer the auto value.
+    fun applyThermoblockOffset(offsetC: Float) {
+        _offsetAuto.value = false
+        client.writeThermoblockOffset(offsetC)
+    }
+
+    // Manual absolute block override also leaves the auto-offset regime.
+    fun applyThermoblockSetpoint(celsius: Float) {
+        _offsetAuto.value = false
+        client.writeThermoblockSetpoint(celsius)
+    }
+    // Fixed brew pressure. A positive value holds that pressure for the whole
+    // shot and outranks the selected profile; 0 hands the shot back to it.
+    fun applyPressureSetpoint(bar: Float) = client.writePressureSetpoint(bar)
     fun applySettings(settings: MachineSettings) = client.writeSettings(settings)
-    fun setBrewing(active: Boolean) = client.writeBrew(active)
+    // Plain pull: pre-infusion + ramp, ignoring any selected profile.
+    fun setBrewing(active: Boolean) = client.writeBrew(active, useProfile = false)
+
+    // Profile pull: runs the selected profile's phase program.
+    fun setProfileBrewing(active: Boolean) = client.writeBrew(active, useProfile = true)
     fun setHeaterEnabled(enabled: Boolean) = client.writeHeaterEnabled(enabled)
     fun applyPreinfusion(seconds: Float) = client.writePreinfusion(seconds)
+    fun applyPumpRamp(seconds: Float) = client.writePumpRamp(seconds)
+
+    // Select (or clear, with null) the bundled pressure/flow profile. Persists
+    // the choice locally and pushes the phase program to the firmware.
+    fun applyBrewProfile(profile: BrewProfile?) {
+        _selectedProfileId.value = profile?.id
+        profilePrefs.edit().apply {
+            if (profile == null) remove(PROFILE_KEY) else putString(PROFILE_KEY, profile.id)
+        }.apply()
+        client.writeBrewProfile(profile)
+    }
     fun triggerFlush() = client.writeFlush(true)
     fun stopFlush() = client.writeFlush(false)
 
@@ -171,6 +284,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     avgGroupC = report.avgGroupC.takeUnless { it.isNaN() },
                     peakGroupC = report.peakGroupC,
                     finalGroupC = report.finalGroupC,
+                    thermoblockOffsetC = report.thermoblockOffsetC.takeUnless { it.isNaN() },
+                    thermoblockManual = report.thermoblockManual,
                     samplesJson = ShotSamples.encode(report.samples),
                 ),
             )
@@ -187,9 +302,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteShot(shot: ShotEntity) = viewModelScope.launch { repo.delete(shot) }
 
+    // Average, over the last OFFSET_HISTORY_SAMPLES relationally-brewed shots,
+    // the offset correction that would have hit each shot's group target
+    // exactly: offsetUsed - (achievedGroup - target). Manual-override shots are
+    // skipped (their offset wasn't driving the thermoblock) and so are shots
+    // shorter than MIN_CALIBRATION_SHOT_MS, whose brief group readings never
+    // reach a representative steady state. Recomputed straight off the `shots`
+    // flow so it tracks the latest brews — and falls back to the saved recent
+    // brews until 10 fresh ones exist. Null when there isn't a usable shot yet,
+    // so callers can leave the current offset alone.
+    private fun calculatedThermoblockOffsetC(): Float? {
+        val corrections =
+            shots.value
+                .asSequence()
+                .filter { !it.thermoblockManual }
+                .filter { it.durationMs > MIN_CALIBRATION_SHOT_MS }
+                .mapNotNull { shot ->
+                    val offsetUsed = shot.thermoblockOffsetC ?: return@mapNotNull null
+                    val achievedGroupC = shot.avgGroupC ?: return@mapNotNull null
+                    offsetUsed - (achievedGroupC - shot.targetC)
+                }
+                .take(OFFSET_HISTORY_SAMPLES)
+                .toList()
+        return corrections.takeIf { it.isNotEmpty() }?.average()?.toFloat()
+    }
+
     companion object {
         private const val POST_SHOT_HOLD_MS = 10_000L
+        private const val MIN_REPORT_DURATION_MS = 10_000L
         private const val REPORT_PAD_MS = 10_000L
+        private const val OFFSET_HISTORY_SAMPLES = 10
+        private const val MIN_CALIBRATION_SHOT_MS = 20_000L
+        private const val PROFILE_PREFS = "esso_brew_profile"
+        private const val PROFILE_KEY = "selected_id"
 
         private fun buildReport(
             durationMs: Long,
@@ -197,6 +342,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             endUptime: Long,
             targetC: Float,
             preinfusionSec: Float,
+            thermoblockOffsetC: Float,
+            thermoblockManual: Boolean,
             history: List<com.esp32esso.tier1.ble.GraphSample>,
         ): ShotReport {
             val from = startUptime - REPORT_PAD_MS
@@ -218,6 +365,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 avgGroupC = avgGroup,
                 finalGroupC = finalGroup,
                 peakGroupC = peakGroup,
+                thermoblockOffsetC = thermoblockOffsetC,
+                thermoblockManual = thermoblockManual,
                 samples = slice,
                 shotStartUptimeMs = startUptime,
                 shotEndUptimeMs = endUptime,

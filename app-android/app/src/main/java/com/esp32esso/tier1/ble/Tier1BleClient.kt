@@ -15,6 +15,8 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,6 +51,7 @@ data class BleUiState(
     val pendingSetpointC: Float? = null,
     val pendingThermoblockOffsetC: Float? = null,
     val preinfusionSec: Float? = null,
+    val pumpRampSec: Float? = null,
     val history: List<GraphSample> = emptyList(),
     val statusMessage: String? = null,
 )
@@ -70,8 +73,23 @@ class Tier1BleClient(context: Context) {
     private var preinfusionCharacteristic: BluetoothGattCharacteristic? = null
     private var flushCharacteristic: BluetoothGattCharacteristic? = null
     private var thermoblockSetpointCharacteristic: BluetoothGattCharacteristic? = null
+    private var pumpRampCharacteristic: BluetoothGattCharacteristic? = null
+    private var brewProfileCharacteristic: BluetoothGattCharacteristic? = null
+    private var pressureSetpointCharacteristic: BluetoothGattCharacteristic? = null
 
     private val history = ArrayDeque<GraphSample>()
+
+    // Android's GATT stack processes exactly one operation at a time: issuing a
+    // second writeCharacteristic before the first's onCharacteristicWrite lands
+    // makes the stack silently drop it. Callers (e.g. applySetpoint, which
+    // writes the offset then the group setpoint) fire writes back to back, so
+    // they are queued here and dispatched one at a time. A watchdog releases the
+    // in-flight slot if a callback never arrives so the queue can't wedge.
+    private val writeLock = Any()
+    private val writeQueue = ArrayDeque<Pair<BluetoothGattCharacteristic, ByteArray>>()
+    private var writeInProgress = false
+    private val writeHandler = Handler(Looper.getMainLooper())
+    private var writeWatchdog: Runnable? = null
 
     private val _uiState = MutableStateFlow(BleUiState())
     val uiState: StateFlow<BleUiState> = _uiState.asStateFlow()
@@ -147,16 +165,25 @@ class Tier1BleClient(context: Context) {
                 flushCharacteristic = service.getCharacteristic(Tier1Gatt.flushUuid)
                 thermoblockSetpointCharacteristic =
                     service.getCharacteristic(Tier1Gatt.thermoblockSetpointUuid)
+                pumpRampCharacteristic = service.getCharacteristic(Tier1Gatt.pumpRampUuid)
+                brewProfileCharacteristic = service.getCharacteristic(Tier1Gatt.brewProfileUuid)
+                pressureSetpointCharacteristic =
+                    service.getCharacteristic(Tier1Gatt.pressureSetpointUuid)
                 if (stateCharacteristic == null || setpointCharacteristic == null) {
                     fail("Missing Tier 2 characteristics")
                     return
                 }
+                // Stay on Connecting until CCCD is armed. Marking Connected here
+                // used to race a brew-profile write (from the ViewModel) against
+                // requestMtu / writeDescriptor, and Android's single in-flight
+                // GATT op then dropped the notify enable — Connected with no
+                // telemetry.
                 _uiState.value =
                     _uiState.value.copy(
-                        phase = ConnectionPhase.Connected,
-                        statusMessage = null,
+                        phase = ConnectionPhase.Connecting,
+                        statusMessage = "Negotiating…",
                     )
-                // Serialize the GATT bring-up: the 48-byte MachineState does not
+                // Serialize the GATT bring-up: the 52-byte MachineState does not
                 // fit the default 23-byte ATT MTU, so grow the MTU first, then
                 // enable notifications, then read the config chain — each step
                 // waits for its own callback since Android runs one op at a time.
@@ -166,6 +193,7 @@ class Tier1BleClient(context: Context) {
             }
 
             override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+                android.util.Log.w("EssoBLE", "onMtuChanged mtu=$mtu status=$status")
                 enableStateNotifications(gatt)
             }
 
@@ -174,10 +202,22 @@ class Tier1BleClient(context: Context) {
                 descriptor: BluetoothGattDescriptor,
                 status: Int,
             ) {
-                if (descriptor.characteristic?.uuid == Tier1Gatt.machineStateUuid) {
-                    // Notifications are live; now walk the read chain.
-                    setpointCharacteristic?.let { gatt.readCharacteristic(it) }
+                if (descriptor.characteristic?.uuid != Tier1Gatt.machineStateUuid) return
+                android.util.Log.w("EssoBLE", "CCCD write status=$status")
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    fail("Notify enable failed ($status)")
+                    return
                 }
+                // Notifications are armed; only now is it safe to call the link
+                // Connected. The config read chain still owns the GATT slot, so
+                // callers must not issue writes until the first MachineState
+                // arrives (see MainViewModel).
+                _uiState.value =
+                    _uiState.value.copy(
+                        phase = ConnectionPhase.Connected,
+                        statusMessage = null,
+                    )
+                setpointCharacteristic?.let { gatt.readCharacteristic(it) }
             }
 
             override fun onCharacteristicChanged(
@@ -221,6 +261,14 @@ class Tier1BleClient(context: Context) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return
                 if (status != BluetoothGatt.GATT_SUCCESS) return
                 handleRead(gatt, characteristic.uuid, characteristic.value ?: return)
+            }
+
+            override fun onCharacteristicWrite(
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                status: Int,
+            ) {
+                finishWrite()
             }
         }
 
@@ -290,6 +338,23 @@ class Tier1BleClient(context: Context) {
         }
     }
 
+    // Pins the shot at a fixed brew pressure, overriding the selected profile.
+    // Passing 0 clears the hold and returns the shot to the profile / ramp.
+    fun writePressureSetpoint(bar: Float) {
+        val characteristic = pressureSetpointCharacteristic ?: return
+        writeChar(characteristic, bar.toLeFloatBytes())
+        val current = _uiState.value.machineState
+        if (current != null) {
+            val on = bar > 0f
+            _uiState.value = _uiState.value.copy(
+                machineState = current.copy(
+                    pressureManual = on,
+                    pressureSetpointBar = if (on) bar else Float.NaN,
+                ),
+            )
+        }
+    }
+
     fun writeFlush(start: Boolean) {
         val characteristic = flushCharacteristic
         if (characteristic == null) {
@@ -311,15 +376,36 @@ class Tier1BleClient(context: Context) {
         writeChar(characteristic, settings.toBytes())
     }
 
-    fun writeBrew(active: Boolean) {
+    // `useProfile` picks which pump program the shot runs: the loaded brew
+    // profile, or the plain pre-infusion + ramp. See protocol/ble/tier2.md.
+    fun writeBrew(active: Boolean, useProfile: Boolean = false) {
         val characteristic = brewControlCharacteristic ?: return
-        writeChar(characteristic, byteArrayOf(if (active) 1 else 0))
+        val cmd: Byte = when {
+            !active -> 0
+            useProfile -> 2
+            else -> 1
+        }
+        writeChar(characteristic, byteArrayOf(cmd))
     }
 
     fun writePreinfusion(seconds: Float) {
         val characteristic = preinfusionCharacteristic ?: return
         _uiState.value = _uiState.value.copy(preinfusionSec = seconds)
         writeChar(characteristic, seconds.toLeFloatBytes())
+    }
+
+    fun writePumpRamp(seconds: Float) {
+        val characteristic = pumpRampCharacteristic ?: return
+        _uiState.value = _uiState.value.copy(pumpRampSec = seconds)
+        writeChar(characteristic, seconds.toLeFloatBytes())
+    }
+
+    // Push the selected brew profile (or clear it, with null) to the firmware.
+    // The blob is well under the negotiated MTU, so it goes as a single write.
+    fun writeBrewProfile(profile: com.esp32esso.tier1.BrewProfile?) {
+        val characteristic = brewProfileCharacteristic ?: return
+        val bytes = profile?.toWireBytes() ?: com.esp32esso.tier1.BrewProfile.clearWireBytes()
+        writeChar(characteristic, bytes)
     }
 
     fun writeHeaterEnabled(enabled: Boolean) {
@@ -335,16 +421,29 @@ class Tier1BleClient(context: Context) {
 
     private fun enableStateNotifications(gatt: BluetoothGatt) {
         val characteristic = stateCharacteristic ?: return
-        gatt.setCharacteristicNotification(characteristic, true)
-        val cccd = characteristic.getDescriptor(CCCD_UUID) ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            gatt.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-        } else {
-            @Suppress("DEPRECATION")
-            run {
-                cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                gatt.writeDescriptor(cccd)
+        if (!gatt.setCharacteristicNotification(characteristic, true)) {
+            fail("Notify registration failed")
+            return
+        }
+        val cccd = characteristic.getDescriptor(CCCD_UUID)
+        if (cccd == null) {
+            fail("Missing CCCD on MachineState")
+            return
+        }
+        val ok =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gatt.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ==
+                    android.bluetooth.BluetoothStatusCodes.SUCCESS
+            } else {
+                @Suppress("DEPRECATION")
+                run {
+                    cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    gatt.writeDescriptor(cccd)
+                }
             }
+        android.util.Log.w("EssoBLE", "CCCD write enqueue ok=$ok")
+        if (!ok) {
+            fail("Notify enable enqueue failed")
         }
     }
 
@@ -364,12 +463,26 @@ class Tier1BleClient(context: Context) {
             }
     }
 
+    // Enqueue a characteristic write; the queue guarantees only one is in flight
+    // at a time (see writeQueue). Safe to call from any thread.
     private fun writeChar(characteristic: BluetoothGattCharacteristic, bytes: ByteArray) {
-        val g = gatt
-        if (g == null) {
+        if (gatt == null) {
             android.util.Log.w("EssoBLE", "writeChar skipped: gatt null")
             return
         }
+        synchronized(writeLock) { writeQueue.addLast(characteristic to bytes) }
+        dispatchNextWrite()
+    }
+
+    private fun dispatchNextWrite() {
+        val g = gatt ?: return
+        val next: Pair<BluetoothGattCharacteristic, ByteArray>
+        synchronized(writeLock) {
+            if (writeInProgress) return
+            next = writeQueue.removeFirstOrNull() ?: return
+            writeInProgress = true
+        }
+        val (characteristic, bytes) = next
         val ok =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 g.writeCharacteristic(characteristic, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
@@ -382,6 +495,24 @@ class Tier1BleClient(context: Context) {
             }
         android.util.Log.w("EssoBLE",
             "writeChar uuid=${characteristic.uuid} len=${bytes.size} ok=$ok")
+        if (!ok) {
+            // The stack refused to even queue it (e.g. busy); release the slot
+            // and move on so one bad write can't wedge the rest of the queue.
+            finishWrite()
+            return
+        }
+        // Watchdog: if onCharacteristicWrite never fires, free the slot anyway.
+        writeWatchdog?.let { writeHandler.removeCallbacks(it) }
+        val watchdog = Runnable { finishWrite() }
+        writeWatchdog = watchdog
+        writeHandler.postDelayed(watchdog, WRITE_TIMEOUT_MS)
+    }
+
+    private fun finishWrite() {
+        writeWatchdog?.let { writeHandler.removeCallbacks(it) }
+        writeWatchdog = null
+        synchronized(writeLock) { writeInProgress = false }
+        dispatchNextWrite()
     }
 
     private fun handleRead(gatt: BluetoothGatt, uuid: UUID, value: ByteArray) {
@@ -409,6 +540,12 @@ class Tier1BleClient(context: Context) {
             Tier1Gatt.preinfusionUuid -> {
                 floatOf(value)?.let {
                     _uiState.value = _uiState.value.copy(preinfusionSec = it)
+                }
+                pumpRampCharacteristic?.let { gatt.readCharacteristic(it) }
+            }
+            Tier1Gatt.pumpRampUuid -> {
+                floatOf(value)?.let {
+                    _uiState.value = _uiState.value.copy(pumpRampSec = it)
                 }
             }
         }
@@ -446,7 +583,16 @@ class Tier1BleClient(context: Context) {
         preinfusionCharacteristic = null
         flushCharacteristic = null
         thermoblockSetpointCharacteristic = null
+        pumpRampCharacteristic = null
+        brewProfileCharacteristic = null
+        pressureSetpointCharacteristic = null
         history.clear()
+        writeWatchdog?.let { writeHandler.removeCallbacks(it) }
+        writeWatchdog = null
+        synchronized(writeLock) {
+            writeQueue.clear()
+            writeInProgress = false
+        }
     }
 
     private fun publishMachineState(bytes: ByteArray) {
@@ -509,6 +655,9 @@ class Tier1BleClient(context: Context) {
         // Max ATT MTU; the 52-byte MachineState needs more than the 23-byte
         // default. The peripheral negotiates down to what it supports.
         private const val PREFERRED_MTU = 517
+
+        // Watchdog fallback if a write's onCharacteristicWrite callback is lost.
+        private const val WRITE_TIMEOUT_MS = 2_000L
 
         private fun floatOf(bytes: ByteArray): Float? {
             if (bytes.size < 4) return null

@@ -74,6 +74,7 @@ object DemoData {
         machineState = machine,
         settings = settings,
         preinfusionSec = 2f,
+        pumpRampSec = 3f,
         history = idleHistory,
     )
 
@@ -134,6 +135,8 @@ object DemoData {
             avgGroupC = if (groupTemps.isEmpty()) Float.NaN else groupTemps.average().toFloat(),
             finalGroupC = groupTemps.lastOrNull() ?: Float.NaN,
             peakGroupC = groupTemps.maxOrNull() ?: Float.NaN,
+            thermoblockOffsetC = machine.thermoblockOffsetC,
+            thermoblockManual = machine.thermoblockManual,
             samples = shotSamples,
             shotStartUptimeMs = shotStart,
             shotEndUptimeMs = shotEnd,
