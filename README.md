@@ -82,10 +82,17 @@ ESP32, `esp32-s3-*` for the S3). Flashing S3 firmware onto a classic ESP32
 
 | Stage | Theme | Status |
 | ----- | ----- | ------ |
-| **1** | Foundation + Tier 1 (Oster Xpert temp control) | in progress |
-| **2** | BLE GATT spec + Android app MVP + Tier 2 | planned |
-| **3** | Pressure & flow profiling + Tier 3 | planned |
+| **1** | Foundation + Tier 1 (Oster Xpert temp control) | working on the bench machine |
+| **2** | BLE GATT spec + Android app MVP + Tier 2 | working on the bench machine |
+| **3** | Pressure & flow profiling + Tier 3 | in progress |
 | **4** | Scales, OTA, profile sharing, multi-machine, docs site + Tier 4 | planned |
+
+Stage 3 currently runs a Standard AC phase-dimmer on the pump, executes the
+bundled pressure/flow profiles (transcribed from gaggimate, gaggiuino and
+Decent), and can hold a fixed operator-set pressure for a whole shot. Duty is
+mapped to pressure through a measured pump curve; see
+[`pump-dimmer-calibration.md`](hardware/oster-xpert/pump-dimmer-calibration.md)
+for the sweep behind it.
 
 The detailed roadmap lives in [`docs/roadmap.md`](docs/roadmap.md).
 
