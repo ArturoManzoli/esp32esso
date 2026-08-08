@@ -12,6 +12,13 @@ constexpr float kMaxBrewSetpointC = 110.0f;  // brew target never needs to excee
 constexpr uint32_t kFlushDurationMs = 3000;  // grouphead flush pulse length
 constexpr uint32_t kPostShotVentMs = 4000;   // relief-valve vent pulse after a shot
 
+// Overtemp trips are self-clearing safety cuts, not manual-clear latches: the
+// heater stays off from the moment the block hits maxSafeTempC until it has
+// cooled back down to this recovery point, then control resumes on its own.
+// Kept well below the cut so a single trip does not immediately re-trip on
+// sensor noise while coasting through the recovery band.
+constexpr float kOvertempRecoveryC = 90.0f;
+
 // Adaptive EMA for the brew-line pressure. The vibration pump injects ~50/60 Hz
 // ripple (and the occasional spike); the sensor's per-read median already kills
 // spikes, and this filter tames the ripple. alpha scales with the size of the
@@ -60,6 +67,7 @@ void TemperatureLoop::begin(const profile::MachineProfile& profile) {
     manualThermoblockSetpoint_ = NAN;
     faulted_ = false;
     faultReason_ = "";
+    overtempAutoRecover_ = false;
     heaterEnabled_ = true;
     lastActivityMs_ = 0;
     activityPending_ = true;  // start the timeout window fresh at boot
@@ -415,17 +423,24 @@ bool TemperatureLoop::heaterOn() const {
 void TemperatureLoop::clearFault() {
     faulted_ = false;
     faultReason_ = "";
+    overtempAutoRecover_ = false;
     pid_.reset();
 }
 
 void TemperatureLoop::latchFault(const char* reason) {
     faulted_ = true;
     faultReason_ = reason;
+    overtempAutoRecover_ = false;
     lastOutput_ = 0.0f;
     windowOnTimeMs_ = 0;
     if (profile_ && profile_->heaterRelay) {
         profile_->heaterRelay->set(false);
     }
+}
+
+void TemperatureLoop::tripOvertemp() {
+    latchFault("overtemp");
+    overtempAutoRecover_ = true;  // self-clears once cooled to kOvertempRecoveryC
 }
 
 void TemperatureLoop::runPidIfDue(uint32_t nowMs) {
@@ -454,19 +469,37 @@ void TemperatureLoop::runPidIfDue(uint32_t nowMs) {
         return;
     }
     if (temp >= profile_->thermal.maxSafeTempC) {
-        latchFault("overtemp");
+        tripOvertemp();
         return;
     }
     if (faulted_) {
-        return;  // latched until operator clears
+        if (overtempAutoRecover_ && temp <= kOvertempRecoveryC) {
+            Serial.printf("# fault: overtemp cleared, cooled to %.1f C\n", temp);
+            clearFault();
+        } else {
+            return;  // sensor-fault (manual clear), or overtemp still cooling
+        }
     }
 
     thermoblockSetpoint_ = computeThermoblockSetpoint();
 
+    // Pick the control variable. When the operator has fixed a GROUP target
+    // (no absolute thermoblock override) and the group probe reads OK, close
+    // the loop directly on the group/portafilter temperature so the cup lands
+    // on the setpoint regardless of transport loss -- the thermoblock finds
+    // whatever temperature that takes. Otherwise (manual thermoblock hold, or a
+    // faulted/absent group sensor) fall back to driving the thermoblock against
+    // its derived setpoint, which is also the graceful safety path. The block
+    // sensor's fault/overtemp latch above still guards safety in every mode.
+    const bool groupDirect =
+        hasGroupSensor() && groupOk_ && !manualThermoblockActive_;
+    const float controlSetpoint = groupDirect ? setpoint_ : thermoblockSetpoint_;
+    const float controlPv = groupDirect ? groupTempC_ : temp;
+
     // Freeze the integrator while the heater is disabled so a term is not
     // accumulated during standby and dumped the instant it is re-enabled.
     pid_.setIntegratorEnabled(heaterEnabled_);
-    float output = pid_.update(thermoblockSetpoint_, temp, dtSec);
+    float output = pid_.update(controlSetpoint, controlPv, dtSec);
 
     // Soft-landing approach taper: ceiling the duty as a function of how far
     // below the setpoint we still are, so the loop eases off instead of holding
@@ -476,22 +509,39 @@ void TemperatureLoop::runPidIfDue(uint32_t nowMs) {
     // keeps that gradient -- and the overshoot -- small.
     const float slope = profile_->thermal.approachDutyPerC;
     if (slope > 0.0f) {
-        float cap = slope * (thermoblockSetpoint_ - temp);
+        float cap = slope * (controlSetpoint - controlPv);
         if (cap < 0.0f) cap = 0.0f;
         if (cap > 1.0f) cap = 1.0f;
         if (output > cap) output = cap;
     }
-    lastOutput_ = output;
 
     // Shot heater boost: during the *main brew* phase only (preinfusionPhase_
     // == 0, i.e. not the pre-infusion pulse or the bloom pause), drive the
     // heater flat-out to counter the cold-water draw that otherwise sags the
-    // thermoblock through the second half of a shot. Capped at the brew target
-    // so we never push past it -- the PID resumes control once the block is at
-    // temperature, and the hard overtemp cut above still guards safety.
-    if (brewing_ && preinfusionPhase_ == 0 && temp < thermoblockSetpoint_) {
-        lastOutput_ = 1.0f;
+    // temperature through the second half of a shot. The PID resumes control
+    // once the control PV is back at the setpoint; the block ceiling and the
+    // hard overtemp cut above still guard safety.
+    if (brewing_ && preinfusionPhase_ == 0 && controlPv < controlSetpoint) {
+        output = 1.0f;
     }
+
+    // Thermoblock ceiling. When closing on the slow group probe the block can
+    // sit far hotter than the cup while the group lags, so bound how hot it may
+    // run: the block never needs to exceed the group target plus the maximum
+    // operator offset. Kept strictly below the hard safety cut, and cutting the
+    // duty here (rather than latching a fault) keeps control smooth. Only
+    // applies in group-direct mode; block-direct mode is self-limiting because
+    // its PV *is* the block.
+    if (groupDirect) {
+        float blockCeil = setpoint_ + profile_->thermal.maxThermoblockOffsetC;
+        const float hardCeil = profile_->thermal.maxSafeTempC - 5.0f;
+        if (blockCeil > hardCeil) blockCeil = hardCeil;
+        if (temp >= blockCeil) {
+            output = 0.0f;
+        }
+    }
+
+    lastOutput_ = output;
 }
 
 void TemperatureLoop::startTuning(uint32_t nowMs,
@@ -560,8 +610,8 @@ void TemperatureLoop::runTuningStep(uint32_t nowMs) {
         return;
     }
     if (temp >= profile_->thermal.maxSafeTempC) {
-        latchFault("overtemp");
-        tuning_.active = false;
+        tripOvertemp();
+        tuning_.active = false;  // bench run over; recovery handled by runPidIfDue()
         return;
     }
     if (temp >= tuning_.abortTempC) {

@@ -105,15 +105,19 @@ const MachineProfile kOsterXpertProfile = {
             // The group sits ~20 cm downstream through PTFE + valves, so the
             // thermoblock must run hotter than the cup target. Seed the slider
             // at +8 °C above the cup target on first boot; the phone tunes it
-            // live in ±20 °C. The bound keeps the safety cap out of reach even
-            // when the user pushes the offset to the extreme.
+            // live in ±50 °C. The bound keeps the safety cap out of reach even
+            // when the user pushes the offset to the extreme, and doubles as the
+            // headroom the group-direct block ceiling is allowed.
             .defaultThermoblockOffsetC = 8.0f,
-            .maxThermoblockOffsetC = 20.0f,
-            // Full duty only allowed >20 C below the setpoint; the drive tapers
-            // to zero at the target so the low-mass block eases in rather than
-            // coasting ~30 C past it. Tuned on the bench against the step
-            // response; see docs/machines/oster-xpert.md.
-            .approachDutyPerC = 0.05f,
+            .maxThermoblockOffsetC = 50.0f,
+            // Full duty only allowed >50 C below the setpoint; the drive tapers
+            // to zero at the target. 0.05 (full duty only >20 C out) still let
+            // a fixed 115 C thermoblock hold coast to ~119-130 C and take
+            // minutes to bleed back off since the block has no active cooling;
+            // widening the taper band to 50 C gives the stored heat much more
+            // room to be reined in before the sensor ever reaches the target.
+            // See docs/machines/oster-xpert.md.
+            .approachDutyPerC = 0.02f,
         },
     .hydraulic =
         {
