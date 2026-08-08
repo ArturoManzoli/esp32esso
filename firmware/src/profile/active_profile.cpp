@@ -41,7 +41,9 @@ const MachineProfile kStubProfile = {
     .heaterRelay = nullptr,
     .groupTempSensor = nullptr,
     .solenoidValve = nullptr,
-    .brewRelay = nullptr,
+    .pumpRelay = nullptr,
+    .pumpDimmer = nullptr,
+    .brewValveRelay = nullptr,
     .pressureSensor = nullptr,
 };
 }  // namespace

@@ -50,7 +50,10 @@ constexpr const char* kPrefsKdKey = "kd";
 constexpr const char* kPrefsSteamKey = "steam";
 constexpr const char* kPrefsHeaterTimeoutKey = "heat_to";
 constexpr const char* kPrefsPreinfusionKey = "preinf";
+constexpr const char* kPrefsPumpRampKey = "pumpRamp";
 constexpr const char* kPrefsThermoblockManualKey = "tbManual";
+constexpr const char* kPrefsPressureManualKey = "pManual";
+constexpr const char* kPrefsBrewProfileKey = "brewProf";
 
 Tier1Service g_service;
 BLECharacteristic* g_stateChar = nullptr;
@@ -87,6 +90,11 @@ MachineStateWire packState(uint32_t nowMs) {
         state.heater_enabled = g_loop->heaterEnabled() ? 1 : 0;
         state.flushing = g_loop->flushing() ? 1 : 0;
         state.thermoblock_manual = g_loop->thermoblockManualActive() ? 1 : 0;
+        state.pressure_manual = g_loop->pressureManualActive() ? 1 : 0;
+        state.pressure_setpoint_bar = g_loop->pressureManualActive()
+                                          ? g_loop->manualPressureBar()
+                                          : NAN;
+        state.profile_elapsed_sec = g_loop->brewProfileElapsedSec(nowMs);
     }
     state.uptime_ms = nowMs;
     return state;
@@ -109,6 +117,35 @@ float loadFloat(const char* key, float fallback) {
     const float v = prefs.getFloat(key, fallback);
     prefs.end();
     return v;
+}
+
+void persistBytes(const char* key, const uint8_t* data, size_t len) {
+    Preferences prefs;
+    if (!prefs.begin(kPrefsNamespace, /*readOnly=*/false)) {
+        return;
+    }
+    if (data == nullptr || len == 0) {
+        prefs.remove(key);
+    } else {
+        prefs.putBytes(key, data, len);
+    }
+    prefs.end();
+}
+
+// Reads a persisted blob into `buf` (capacity `cap`); returns the byte count
+// (0 if absent or too large to fit).
+size_t loadBytes(const char* key, uint8_t* buf, size_t cap) {
+    Preferences prefs;
+    if (!prefs.begin(kPrefsNamespace, /*readOnly=*/true)) {
+        return 0;
+    }
+    const size_t len = prefs.getBytesLength(key);
+    size_t read = 0;
+    if (len > 0 && len <= cap) {
+        read = prefs.getBytes(key, buf, len);
+    }
+    prefs.end();
+    return read;
 }
 
 bool readFloatArg(BLECharacteristic* characteristic, float* out) {
@@ -176,6 +213,27 @@ public:
     }
 };
 
+class PressureSetpointCallbacks : public BLECharacteristicCallbacks {
+public:
+    void onWrite(BLECharacteristic* characteristic) override {
+        float requested = 0.0f;
+        if (g_loop == nullptr || characteristic == nullptr) {
+            return;
+        }
+        // Raw read (no NaN guard) so a NaN sentinel can also clear the hold.
+        const std::string& value = characteristic->getValue();
+        if (value.size() < sizeof(float)) {
+            return;
+        }
+        std::memcpy(&requested, value.data(), sizeof(float));
+        g_loop->setManualPressureBar(requested);
+        const float accepted =
+            g_loop->pressureManualActive() ? g_loop->manualPressureBar() : 0.0f;
+        persistFloat(kPrefsPressureManualKey, accepted);
+        writeBackFloat(characteristic, accepted);
+    }
+};
+
 // Any non-zero byte written arms a fixed-length grouphead flush. Writing 0
 // cancels the flush early.
 class FlushCallbacks : public BLECharacteristicCallbacks {
@@ -237,7 +295,12 @@ public:
         if (value.empty()) {
             return;
         }
-        g_loop->setManualBrew(value[0] != 0);
+        // 0 stops. 1 pulls a plain shot (pre-infusion + ramp, ignoring any
+        // loaded profile); 2 runs the loaded profile. Any other non-zero value
+        // starts a shot with the profile, matching the pre-v4 single-button
+        // behaviour.
+        const uint8_t cmd = static_cast<uint8_t>(value[0]);
+        g_loop->setManualBrew(cmd != 0, /*useProfile=*/cmd != 1);
     }
 };
 
@@ -252,6 +315,40 @@ public:
         const float accepted = g_loop->preinfusionSeconds();
         persistFloat(kPrefsPreinfusionKey, accepted);
         writeBackFloat(characteristic, accepted);
+    }
+};
+
+class PumpRampCallbacks : public BLECharacteristicCallbacks {
+public:
+    void onWrite(BLECharacteristic* characteristic) override {
+        float requested = 0.0f;
+        if (g_loop == nullptr || !readFloatArg(characteristic, &requested)) {
+            return;
+        }
+        g_loop->setPumpRampSeconds(requested);
+        const float accepted = g_loop->pumpRampSeconds();
+        persistFloat(kPrefsPumpRampKey, accepted);
+        writeBackFloat(characteristic, accepted);
+    }
+};
+
+// Brew pressure/flow profile blob (see tier1_gatt.h / TemperatureLoop::
+// setBrewProfile). The whole payload is handed to the loop, then persisted so
+// the selected profile survives a reboot. A short/zero-phase payload clears it.
+class BrewProfileCallbacks : public BLECharacteristicCallbacks {
+public:
+    void onWrite(BLECharacteristic* characteristic) override {
+        if (g_loop == nullptr || characteristic == nullptr) {
+            return;
+        }
+        const std::string& value = characteristic->getValue();
+        const auto* data = reinterpret_cast<const uint8_t*>(value.data());
+        g_loop->setBrewProfile(data, value.size());
+        if (g_loop->brewProfileActive()) {
+            persistBytes(kPrefsBrewProfileKey, data, value.size());
+        } else {
+            persistBytes(kPrefsBrewProfileKey, nullptr, 0);
+        }
     }
 };
 
@@ -322,6 +419,17 @@ void Tier1Service::begin(control::TemperatureLoop* loop,
             loadFloat(kPrefsHeaterTimeoutKey, loop_->heaterTimeoutMinutes()));
         loop_->setPreinfusionSeconds(
             loadFloat(kPrefsPreinfusionKey, loop_->preinfusionSeconds()));
+        loop_->setPumpRampSeconds(
+            loadFloat(kPrefsPumpRampKey, loop_->pumpRampSeconds()));
+        loop_->setManualPressureBar(loadFloat(kPrefsPressureManualKey, 0.0f));
+        // Restore the selected brew profile (if any) from NVS.
+        uint8_t profileBlob[kBrewProfileHeaderSize +
+                            kBrewProfileMaxPhases * kBrewProfilePhaseSize];
+        const size_t profileLen =
+            loadBytes(kPrefsBrewProfileKey, profileBlob, sizeof(profileBlob));
+        if (profileLen > 0) {
+            loop_->setBrewProfile(profileBlob, profileLen);
+        }
     }
 
     BLEDevice::init(kDeviceName);
@@ -334,9 +442,9 @@ void Tier1Service::begin(control::TemperatureLoop* loop,
 
     // The default BLEService handle budget is 15, which counts declaration and
     // value handles per characteristic (2 each) plus any descriptor handles
-    // (1 each) plus the service declaration itself. With nine characteristics
+    // (1 each) plus the service declaration itself. With ten characteristics
     // and one Client Characteristic Configuration Descriptor on machine-state,
-    // that lands at 20 handles -- overflow silently drops the tail of the
+    // that lands at 22 handles -- overflow silently drops the tail of the
     // GATT table (e.g. flush and the thermoblock setpoint), which then makes
     // writes from the app be treated as "characteristic not found" and vanish.
     // Bumping the budget with plenty of margin future-proofs adding another
@@ -385,14 +493,33 @@ void Tier1Service::begin(control::TemperatureLoop* loop,
         BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
     thermoblockSetpointChar->setCallbacks(new ThermoblockSetpointCallbacks());
 
+    BLECharacteristic* pumpRampChar = service->createCharacteristic(
+        kPumpRampUuid,
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+    pumpRampChar->setCallbacks(new PumpRampCallbacks());
+
+    BLECharacteristic* brewProfileChar = service->createCharacteristic(
+        kBrewProfileUuid,
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+    brewProfileChar->setCallbacks(new BrewProfileCallbacks());
+
+    BLECharacteristic* pressureSetpointChar = service->createCharacteristic(
+        kPressureSetpointUuid,
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+    pressureSetpointChar->setCallbacks(new PressureSetpointCallbacks());
+
     if (loop_ != nullptr) {
         writeBackFloat(setpointChar, loop_->setpointCelsius());
         writeBackFloat(thermoblockOffsetChar, loop_->thermoblockOffsetC());
         writeBackFloat(preinfusionChar, loop_->preinfusionSeconds());
+        writeBackFloat(pumpRampChar, loop_->pumpRampSeconds());
         writeBackFloat(thermoblockSetpointChar,
                        loop_->thermoblockManualActive()
                            ? loop_->manualThermoblockSetpointC()
                            : 0.0f);
+        writeBackFloat(pressureSetpointChar,
+                       loop_->pressureManualActive() ? loop_->manualPressureBar()
+                                                     : 0.0f);
         SettingsWire s{loop_->pidKp(), loop_->pidKi(), loop_->pidKd(),
                        loop_->steamSetpointCelsius(), loop_->heaterTimeoutMinutes()};
         uint8_t bytes[sizeof(SettingsWire)];

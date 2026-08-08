@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "hal/ac_phase_dimmer.h"
 #include "hal/discrete_input.h"
 #include "hal/discrete_output.h"
 #include "hal/ntc_thermistor_sensor.h"
@@ -80,10 +81,15 @@ struct MachineProfile {
     // directly against the user setpoint.
     hal::TemperatureSensor* groupTempSensor;
 
-    // Tier 2 - relief/3-way solenoid (post-shot vent pulse) and brew SSR
-    // (pump/valve while the app shot timer is running).
+    // Tier 2 - relief/3-way solenoid (post-shot vent pulse) plus the pump and
+    // brew-valve actuators for a shot. Prefer pumpDimmer (Standard AC
+    // phase-angle module on DIM + Z-C) when present; otherwise pumpRelay is
+    // the legacy zero-cross SSR path (time-proportioned). brewValveRelay is
+    // always plain on/off -- never PWM'd.
     hal::DiscreteOutput* solenoidValve;
-    hal::DiscreteOutput* brewRelay;
+    hal::DiscreteOutput* pumpRelay;
+    hal::AcPhaseDimmer* pumpDimmer;
+    hal::DiscreteOutput* brewValveRelay;
 
     // Tier 2+ - optional
     hal::PressureSensor* pressureSensor;

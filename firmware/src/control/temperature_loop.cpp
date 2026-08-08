@@ -2,7 +2,9 @@
 
 #include <Arduino.h>  // Serial for the flush/offset trace lines
 
+#include <cassert>
 #include <cmath>
+#include <cstring>
 
 namespace esp32esso::control {
 
@@ -11,6 +13,105 @@ constexpr uint32_t kPidPeriodMs = 200;  // 5 Hz; thermocouple settles slowly
 constexpr float kMaxBrewSetpointC = 110.0f;  // brew target never needs to exceed this
 constexpr uint32_t kFlushDurationMs = 3000;  // grouphead flush pulse length
 constexpr uint32_t kPostShotVentMs = 4000;   // relief-valve vent pulse after a shot
+
+// Pump soft-start (pressure ramp). With a phase-angle dimmer the duty is
+// conduction angle; the legacy zero-cross SSR path still time-proportions
+// across kPumpRampWindowMs (10 Hz). kPumpRampStartDuty is the duty at the
+// very start of the ramp (never 0, so the vibration pump still primes).
+constexpr uint32_t kPumpRampWindowMs = 100;
+constexpr float kPumpRampStartDuty = 0.30f;
+
+// Dead-man ceiling for the open-loop pump bench: a run never outlives this,
+// even if the host asks for longer or stops talking mid-sweep.
+constexpr uint32_t kPumpBenchMaxMs = 30UL * 1000UL;
+
+// Measured pump characterisation (Oster Xpert, phase dimmer, fresh puck):
+// commanded duty against the brew pressure it settles at. The vibration pump
+// only starts moving water near kPumpThresholdDuty -- below that it cannot beat
+// its own spring plus the puck -- so the whole 0..12 bar range is squeezed into
+// the top of the duty scale, and a flat "duty = bar / OPV" law would ask for
+// duties that produce nothing at all. Feedforward inverts this table instead.
+struct PressureDutyPoint {
+    float bar;
+    float duty;
+};
+constexpr PressureDutyPoint kPumpCurve[] = {
+    {0.00f, 0.55f}, {2.47f, 0.60f}, {7.10f, 0.70f},
+    {9.28f, 0.80f}, {10.83f, 0.90f}, {12.06f, 1.00f},
+};
+constexpr size_t kPumpCurveLen = sizeof(kPumpCurve) / sizeof(kPumpCurve[0]);
+constexpr float kPumpThresholdDuty = kPumpCurve[0].duty;
+
+// Duty expected to settle at `bar`, interpolated between measured points and
+// clamped to the ends of the characterised range. Zero (or negative) asks for
+// no pressure at all, which means an idle pump rather than the threshold duty.
+float pumpDutyForPressure(float bar) {
+    if (bar <= 0.0f) {
+        return 0.0f;
+    }
+    for (size_t i = 1; i < kPumpCurveLen; ++i) {
+        if (bar <= kPumpCurve[i].bar) {
+            const PressureDutyPoint& a = kPumpCurve[i - 1];
+            const PressureDutyPoint& b = kPumpCurve[i];
+            const float span = b.bar - a.bar;
+            const float f = (span > 0.0f) ? (bar - a.bar) / span : 0.0f;
+            return a.duty + (b.duty - a.duty) * f;
+        }
+    }
+    return kPumpCurve[kPumpCurveLen - 1].duty;
+}
+
+// Anchors the interpolation: the ends, an exact measured knot, a segment
+// midpoint, and monotonicity across the range. A mis-entered table fails at
+// boot instead of quietly driving the pump to the wrong pressure.
+bool pumpCurveSane() {
+    if (pumpDutyForPressure(-1.0f) != 0.0f) return false;
+    if (pumpDutyForPressure(0.0f) != 0.0f) return false;
+    if (fabsf(pumpDutyForPressure(2.47f) - 0.60f) > 0.001f) return false;
+    if (fabsf(pumpDutyForPressure(8.19f) - 0.75f) > 0.01f) return false;
+    if (fabsf(pumpDutyForPressure(50.0f) - 1.0f) > 0.001f) return false;
+    float prev = -1.0f;
+    for (int i = 0; i <= 13; ++i) {
+        const float d = pumpDutyForPressure(static_cast<float>(i));
+        if (d < prev) return false;
+        prev = d;
+    }
+    return true;
+}
+
+// Closed-loop trim on top of that feedforward. The measured plant gain runs
+// 12..46 bar per unit duty, so its inverse (~0.02..0.08 duty/bar) bounds what
+// can be stable; sitting at the low end keeps the loop from oscillating in the
+// steep region just above the threshold, where the gain is worst.
+constexpr float kProfilePressKp = 0.02f;
+
+// Flow phases run open loop (no flow sensor): the ml/s target spans the pump's
+// usable duty band rather than the whole 0..1 scale, since the bottom half of
+// that scale moves no water. The phase's pressure limit trims duty back by
+// kProfileFlowLimitKp per bar of overshoot when a transducer exists, scaled to
+// the same plant gain as the pressure trim.
+constexpr float kProfileMaxFlowMlS = 8.0f;
+constexpr float kProfileFlowLimitKp = 0.05f;
+
+// Ceiling for an operator-set pressure hold: the top of the characterised pump
+// curve, since asking for more than the pump measurably delivers would just
+// peg it at full duty while reporting a target it can never reach.
+constexpr float kMaxManualPressureBar = 12.0f;
+
+// Interpolated target of a profile phase at `elapsedSec` into it: ramps
+// targetStart -> targetEnd across transitionSec (eased for curve 2), then holds
+// targetEnd for the rest of the phase.
+float profilePhaseTargetValue(uint8_t curve, float start, float end,
+                              float transitionSec, float elapsedSec) {
+    if (curve == 0 || transitionSec <= 0.0f || elapsedSec >= transitionSec) {
+        return end;
+    }
+    float f = elapsedSec / transitionSec;
+    if (f < 0.0f) f = 0.0f;
+    if (f > 1.0f) f = 1.0f;
+    const float eased = (curve == 2) ? f * f * (3.0f - 2.0f * f) : f;
+    return start + (end - start) * eased;
+}
 
 // Overtemp trips are self-clearing safety cuts, not manual-clear latches: the
 // heater stays off from the moment the block hits maxSafeTempC until it has
@@ -48,6 +149,7 @@ constexpr uint32_t kCalStepTimeoutMs = 240UL * 1000UL;  // give up waiting per r
 }  // namespace
 
 void TemperatureLoop::begin(const profile::MachineProfile& profile) {
+    assert(pumpCurveSane());
     profile_ = &profile;
     setpoint_ = profile.thermal.defaultBrewTempC;
     kp_ = profile.thermal.pidKp;
@@ -77,6 +179,16 @@ void TemperatureLoop::begin(const profile::MachineProfile& profile) {
     shotStartMs_ = 0;
     preinfusionPhase_ = 0;
     preinfusionPhaseStartMs_ = 0;
+    pumpRampSec_ = 0.0f;
+    pumpWindowStartMs_ = 0;
+    pumpWindowOnMs_ = 0;
+    // Brew profile is loaded from NVS by the BLE layer after begin(); start
+    // cleared so a Tier 1 (no BLE) build simply never has one.
+    profileActive_ = false;
+    profilePhaseCount_ = 0;
+    profilePhaseIndex_ = 0;
+    profilePhaseStartMs_ = 0;
+    profileTempC_ = 0.0f;
     flushing_ = false;
     flushUntilMs_ = 0;
     reliefValveOpen_ = false;
@@ -94,8 +206,14 @@ void TemperatureLoop::begin(const profile::MachineProfile& profile) {
     if (profile.solenoidValve) {
         profile.solenoidValve->set(false);
     }
-    if (profile.brewRelay) {
-        profile.brewRelay->set(false);
+    if (profile.pumpRelay) {
+        profile.pumpRelay->set(false);
+    }
+    if (profile.pumpDimmer) {
+        profile.pumpDimmer->setDuty(0.0f);
+    }
+    if (profile.brewValveRelay) {
+        profile.brewValveRelay->set(false);
     }
 }
 
@@ -107,7 +225,7 @@ void TemperatureLoop::tick(uint32_t nowMs) {
     updateBrewState(nowMs);
     updatePreinfusion(nowMs);
     updateFlush(nowMs);
-    updateBrewRelay();
+    updatePumpAndBrewValve(nowMs);
     updateReliefValve(nowMs);
     updatePressure();
     updateHeaterTimeout(nowMs);
@@ -211,8 +329,11 @@ bool TemperatureLoop::hasGroupSensor() const {
     return profile_ != nullptr && profile_->groupTempSensor != nullptr;
 }
 
-void TemperatureLoop::setManualBrew(bool on) {
+void TemperatureLoop::setManualBrew(bool on, bool useProfile) {
     manualBrew_ = on;
+    if (on) {
+        brewUseProfile_ = useProfile;
+    }
     activityPending_ = true;
 }
 
@@ -220,6 +341,70 @@ void TemperatureLoop::setPreinfusionSeconds(float seconds) {
     if (std::isnan(seconds) || seconds < 0.0f) return;
     if (seconds > 30.0f) seconds = 30.0f;
     preinfusionSec_ = seconds;
+}
+
+void TemperatureLoop::setPumpRampSeconds(float seconds) {
+    if (std::isnan(seconds) || seconds < 0.0f) return;
+    if (seconds > 15.0f) seconds = 15.0f;
+    pumpRampSec_ = seconds;
+}
+
+void TemperatureLoop::setBrewProfile(const uint8_t* data, size_t len) {
+    // Wire layout mirrors BrewProfile.toWireBytes in the app (see tier1_gatt.h):
+    // an 8-byte header then N x 28-byte little-endian phase records. Anything
+    // that does not carry at least one complete phase clears the profile.
+    constexpr size_t kHeader = 8;
+    constexpr size_t kPhase = 28;
+    if (data == nullptr || len < kHeader + kPhase) {
+        clearBrewProfile();
+        return;
+    }
+    const uint8_t version = data[0];
+    uint8_t phaseCount = data[1];
+    if (version != 1 || phaseCount == 0) {
+        clearBrewProfile();
+        return;
+    }
+    if (phaseCount > kMaxProfilePhases) phaseCount = kMaxProfilePhases;
+    const size_t available = (len - kHeader) / kPhase;
+    if (phaseCount > available) phaseCount = static_cast<uint8_t>(available);
+    if (phaseCount == 0) {
+        clearBrewProfile();
+        return;
+    }
+
+    float tempC = 0.0f;
+    std::memcpy(&tempC, data + 4, sizeof(float));
+
+    for (uint8_t i = 0; i < phaseCount; ++i) {
+        const uint8_t* p = data + kHeader + static_cast<size_t>(i) * kPhase;
+        ProfilePhaseRt& rt = profilePhases_[i];
+        rt.mode = p[0];
+        rt.curve = p[1];
+        rt.valveOpen = p[2] != 0;
+        std::memcpy(&rt.targetStart, p + 4, sizeof(float));
+        std::memcpy(&rt.targetEnd, p + 8, sizeof(float));
+        std::memcpy(&rt.transitionSec, p + 12, sizeof(float));
+        std::memcpy(&rt.durationSec, p + 16, sizeof(float));
+        std::memcpy(&rt.restriction, p + 20, sizeof(float));
+        std::memcpy(&rt.stopPressureAbove, p + 24, sizeof(float));
+    }
+    profilePhaseCount_ = phaseCount;
+    profileTempC_ = tempC;
+    profileActive_ = true;
+    Serial.printf("# profile: set %u phases, temp=%.1fC\n",
+                  static_cast<unsigned>(phaseCount),
+                  static_cast<double>(tempC));
+}
+
+void TemperatureLoop::clearBrewProfile() {
+    if (profileActive_) {
+        Serial.println(F("# profile: cleared"));
+    }
+    profileActive_ = false;
+    profilePhaseCount_ = 0;
+    profilePhaseIndex_ = 0;
+    profileTempC_ = 0.0f;
 }
 
 void TemperatureLoop::setHeaterEnabled(bool on) {
@@ -244,10 +429,19 @@ void TemperatureLoop::updateBrewState(uint32_t nowMs) {
         brewing_ = true;
         shotStartMs_ = nowMs;
         brewSource_ = 1;
-        // Arm pre-infusion (pump-on phase) when configured; otherwise brew
-        // straight away (phase 0).
-        preinfusionPhase_ = (preinfusionSec_ >= 0.05f) ? 1 : 0;
-        preinfusionPhaseStartMs_ = nowMs;
+        if (profileActive_ && profilePhaseCount_ > 0) {
+            // A profile owns the whole pump program, so skip the built-in
+            // pre-infusion state machine (phase 0) and start the profile at its
+            // first phase.
+            preinfusionPhase_ = 0;
+            profilePhaseIndex_ = 0;
+            profilePhaseStartMs_ = nowMs;
+        } else {
+            // Arm pre-infusion (pump-on phase) when configured; otherwise brew
+            // straight away (phase 0).
+            preinfusionPhase_ = (preinfusionSec_ >= 0.05f) ? 1 : 0;
+            preinfusionPhaseStartMs_ = nowMs;
+        }
     } else if (!active && brewing_) {
         brewing_ = false;
         brewSource_ = 0;
@@ -273,17 +467,265 @@ void TemperatureLoop::updatePreinfusion(uint32_t nowMs) {
     }
 }
 
-void TemperatureLoop::updateBrewRelay() {
-    if (profile_ == nullptr || profile_->brewRelay == nullptr) {
+void TemperatureLoop::updatePumpAndBrewValve(uint32_t nowMs) {
+    if (profile_ == nullptr) {
         return;
     }
-    // Pump runs whenever brewing (except during the pre-infusion bloom pause,
-    // phase 2), or during an operator-triggered grouphead flush. The relief
-    // valve is held closed for both cases (see updateReliefValve) so the
-    // pumped water reaches the shower screen instead of dumping to the tray.
+    // Open-loop pump bench: a fixed duty with the brew valve open, so the pump
+    // can be characterised against the transducer. A shot or flush reclaims the
+    // pump, and the run always expires on its own.
+    if (pumpBench_.active) {
+        if (brewing_ || flushing_ ||
+            (nowMs - pumpBench_.startMs) >= pumpBench_.durationMs) {
+            stopPumpBench();
+        } else {
+            if (profile_->brewValveRelay) {
+                profile_->brewValveRelay->set(true);
+            }
+            applyPumpDuty(nowMs, pumpBench_.duty);
+            return;
+        }
+    }
+    // Pump/valve run whenever brewing (except during the pre-infusion bloom
+    // pause, phase 2), or during an operator-triggered grouphead flush. The
+    // relief valve is held closed for both cases (see updateReliefValve) so
+    // the pumped water reaches the shower screen instead of dumping to the
+    // tray.
     const bool pumpFromShot = brewing_ && preinfusionPhase_ != 2;
+
+    // A manual pressure hold outranks everything else during a shot: it pins a
+    // flat pressure for the whole shot, so it wins over the selected profile
+    // exactly as the manual thermoblock setpoint wins over group + offset.
+    if (manualPressureActive_ && pumpFromShot && !flushing_) {
+        if (profile_->brewValveRelay) {
+            profile_->brewValveRelay->set(true);
+        }
+        applyPumpDuty(nowMs, pressureHoldDuty(manualPressureBar_));
+        return;
+    }
+
+    // A brew profile owns the entire pump program during a shot (never a
+    // flush): it runs its phases, driving the brew valve and the pump duty
+    // itself. Everything else -- a flush, or a shot with no profile -- falls
+    // through to the built-in pre-infusion + soft-start ramp below.
+    if (brewUseProfile_ && profileActive_ && profilePhaseCount_ > 0 && pumpFromShot &&
+        !flushing_) {
+        updateProfileExecution(nowMs);
+        return;
+    }
+
     const bool pumpOn = pumpFromShot || flushing_;
-    profile_->brewRelay->set(pumpOn);
+
+    // Brew valve: plain on/off, mirroring pumpOn exactly. It is intentionally
+    // never time-proportioned -- chopping a solenoid at the ramp/PWM rate
+    // would chatter and buzz it the same way the relief valve used to (see
+    // updateReliefValve); the valve just needs to be open whenever the pump
+    // should be pushing water, full stop.
+    if (profile_->brewValveRelay) {
+        profile_->brewValveRelay->set(pumpOn);
+    }
+
+    if (profile_->pumpRelay == nullptr && profile_->pumpDimmer == nullptr) {
+        return;
+    }
+    if (!pumpOn) {
+        applyPumpDuty(nowMs, 0.0f);
+        return;
+    }
+
+    // Soft-start pressure ramp: only during a shot (never a flush) and only
+    // while the ramp window is open. With a phase dimmer this is real
+    // conduction-angle duty; with a legacy zero-cross SSR it is slow-PWM.
+    // Duty climbs from kPumpRampStartDuty to 1.0 across pumpRampSec_ measured
+    // from shot start (which covers the initial pre-infusion push too).
+    float duty = 1.0f;
+    if (pumpFromShot && !flushing_ && pumpRampSec_ > 0.0f) {
+        const uint32_t rampMs = static_cast<uint32_t>(pumpRampSec_ * 1000.0f);
+        const uint32_t elapsed = nowMs - shotStartMs_;
+        if (rampMs > 0 && elapsed < rampMs) {
+            const float frac = static_cast<float>(elapsed) / static_cast<float>(rampMs);
+            duty = kPumpRampStartDuty + (1.0f - kPumpRampStartDuty) * frac;
+        }
+    }
+
+    applyPumpDuty(nowMs, duty);
+}
+
+float TemperatureLoop::brewProfileElapsedSec(uint32_t nowMs) const {
+    if (!brewing_ || !brewUseProfile_ || !profileActive_ || profilePhaseCount_ == 0 ||
+        flushing_) {
+        return NAN;
+    }
+    float elapsed = 0.0f;
+    for (uint8_t i = 0; i < profilePhaseIndex_ && i < profilePhaseCount_; ++i) {
+        elapsed += profilePhases_[i].durationSec;
+    }
+    const float inPhase = static_cast<float>(nowMs - profilePhaseStartMs_) / 1000.0f;
+    const float phaseDur = profilePhases_[profilePhaseIndex_].durationSec;
+    // The last phase holds until the operator ends the shot; clamping keeps the
+    // reported position from running off the end of the profile.
+    return elapsed + ((inPhase > phaseDur) ? phaseDur : inPhase);
+}
+
+void TemperatureLoop::updateProfileExecution(uint32_t nowMs) {
+    // Advance through phases: a phase ends when its duration elapses, or early
+    // if it names a stopPressureAbove and the transducer reports at/above it.
+    // The final phase holds until the operator ends the shot.
+    while (profilePhaseIndex_ < profilePhaseCount_) {
+        const ProfilePhaseRt& ph = profilePhases_[profilePhaseIndex_];
+        const uint32_t elapsedMs = nowMs - profilePhaseStartMs_;
+        const uint32_t durMs = static_cast<uint32_t>(ph.durationSec * 1000.0f);
+        const bool timeUp = durMs > 0 && elapsedMs >= durMs;
+        const bool pressureStop =
+            ph.stopPressureAbove > 0.0f && pressureOk_ && !std::isnan(pressureBar_) &&
+            pressureBar_ >= ph.stopPressureAbove;
+        if ((timeUp || pressureStop) && profilePhaseIndex_ + 1 < profilePhaseCount_) {
+            profilePhaseIndex_++;
+            profilePhaseStartMs_ = nowMs;
+            continue;
+        }
+        break;
+    }
+
+    const ProfilePhaseRt& ph = profilePhases_[profilePhaseIndex_];
+    const float elapsedSec =
+        static_cast<float>(nowMs - profilePhaseStartMs_) / 1000.0f;
+    const float target = profilePhaseTargetValue(ph.curve, ph.targetStart,
+                                                 ph.targetEnd, ph.transitionSec,
+                                                 elapsedSec);
+
+    // The brew valve follows the phase intent: a closed valve (e.g. a bloom /
+    // soak pause) lets the puck rest with no flow, so the pump also idles.
+    if (profile_->brewValveRelay) {
+        profile_->brewValveRelay->set(ph.valveOpen);
+    }
+    if (!ph.valveOpen) {
+        applyPumpDuty(nowMs, 0.0f);
+        return;
+    }
+
+    const bool haveP = pressureOk_ && !std::isnan(pressureBar_);
+    float duty;
+    if (ph.mode == 0) {
+        duty = pressureHoldDuty(target);
+    } else {
+        // Flow phase: open-loop duty from the ml/s target across the pump's
+        // usable band, with the phase's pressure limit (restriction) trimming
+        // duty back if the puck spikes.
+        float frac = (kProfileMaxFlowMlS > 0.0f) ? target / kProfileMaxFlowMlS : 0.0f;
+        if (frac < 0.0f) frac = 0.0f;
+        if (frac > 1.0f) frac = 1.0f;
+        duty = (frac > 0.0f)
+                   ? kPumpThresholdDuty + (1.0f - kPumpThresholdDuty) * frac
+                   : 0.0f;
+        if (haveP && ph.restriction > 0.0f && pressureBar_ > ph.restriction) {
+            duty -= kProfileFlowLimitKp * (pressureBar_ - ph.restriction);
+        }
+    }
+    if (duty < 0.0f) duty = 0.0f;
+    if (duty > 1.0f) duty = 1.0f;
+    applyPumpDuty(nowMs, duty);
+}
+
+// Drive the pump at `duty` (0..1). Prefers the phase-angle dimmer when the
+// profile has one; otherwise falls back to slow-PWM on a zero-cross SSR.
+// Shared by the built-in ramp and the profile engine.
+void TemperatureLoop::applyPumpDuty(uint32_t nowMs, float duty) {
+    if (profile_->pumpDimmer != nullptr) {
+        profile_->pumpDimmer->setDuty(duty);
+        pumpWindowStartMs_ = 0;
+        pumpWindowOnMs_ = 0;
+        return;
+    }
+    if (profile_->pumpRelay == nullptr) {
+        return;
+    }
+    if (duty <= 0.001f) {
+        profile_->pumpRelay->set(false);
+        pumpWindowStartMs_ = 0;
+        pumpWindowOnMs_ = 0;
+        return;
+    }
+    // At (or effectively at) full duty, drive the SSR continuously -- no point
+    // pulsing a fully-open pump, and it avoids needless SSR/pump cycling.
+    if (duty >= 0.999f) {
+        profile_->pumpRelay->set(true);
+        pumpWindowStartMs_ = 0;
+        pumpWindowOnMs_ = 0;
+        return;
+    }
+
+    // Time-proportional (slow-PWM) drive over kPumpRampWindowMs at `duty`.
+    if (pumpWindowStartMs_ == 0 || (nowMs - pumpWindowStartMs_) >= kPumpRampWindowMs) {
+        pumpWindowStartMs_ = nowMs;
+        pumpWindowOnMs_ = static_cast<uint32_t>(duty * kPumpRampWindowMs);
+    }
+    const bool on = (nowMs - pumpWindowStartMs_) < pumpWindowOnMs_;
+    profile_->pumpRelay->set(on);
+}
+
+// Duty that should hold `targetBar` at the puck: feedforward off the measured
+// pump curve, trimmed by the transducer error when one is readable. Shared by
+// the manual pressure hold and the profile engine's pressure phases.
+float TemperatureLoop::pressureHoldDuty(float targetBar) const {
+    float duty = pumpDutyForPressure(targetBar);
+    if (duty > 0.0f && pressureOk_ && !std::isnan(pressureBar_)) {
+        duty += kProfilePressKp * (targetBar - pressureBar_);
+    }
+    if (duty < 0.0f) duty = 0.0f;
+    if (duty > 1.0f) duty = 1.0f;
+    return duty;
+}
+
+void TemperatureLoop::setManualPressureBar(float bar) {
+    if (std::isnan(bar) || bar <= 0.0f) {
+        clearManualPressure();
+        return;
+    }
+    if (bar > kMaxManualPressureBar) {
+        bar = kMaxManualPressureBar;
+    }
+    manualPressureActive_ = true;
+    manualPressureBar_ = bar;
+    activityPending_ = true;
+}
+
+void TemperatureLoop::clearManualPressure() {
+    manualPressureActive_ = false;
+    manualPressureBar_ = NAN;
+}
+
+void TemperatureLoop::startPumpBench(uint32_t nowMs, float duty, uint32_t durationMs) {
+    if (profile_ == nullptr || brewing_ || flushing_) {
+        return;
+    }
+    if (profile_->pumpDimmer == nullptr && profile_->pumpRelay == nullptr) {
+        return;
+    }
+    if (duty < 0.0f) duty = 0.0f;
+    if (duty > 1.0f) duty = 1.0f;
+    if (durationMs == 0 || durationMs > kPumpBenchMaxMs) {
+        durationMs = kPumpBenchMaxMs;
+    }
+    pumpBench_.active = true;
+    pumpBench_.duty = duty;
+    pumpBench_.durationMs = durationMs;
+    pumpBench_.startMs = nowMs;
+}
+
+void TemperatureLoop::stopPumpBench() {
+    if (!pumpBench_.active) {
+        return;
+    }
+    pumpBench_.active = false;
+    pumpBench_.duty = 0.0f;
+    if (profile_ == nullptr) {
+        return;
+    }
+    if (profile_->brewValveRelay) {
+        profile_->brewValveRelay->set(false);
+    }
+    applyPumpDuty(0, 0.0f);  // nowMs is unused on the zero-duty path
 }
 
 void TemperatureLoop::updateReliefValve(uint32_t nowMs) {

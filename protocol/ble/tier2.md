@@ -22,9 +22,13 @@ in `app-android/.../ble/Tier1Gatt.kt`.
 
 - **Properties:** READ, NOTIFY
 - **CCCD:** required for NOTIFY (standard `0x2902` descriptor)
-- **Payload:** 52-byte little-endian struct, pushed at 4 Hz, or 20 Hz while a
+- **Payload:** 60-byte little-endian struct, pushed at 4 Hz, or 20 Hz while a
   shot is being pulled or the open-loop tuning bench is active (for a smooth
   brew graph; still well within the negotiated 7.5-22.5 ms connection interval).
+
+The manual pressure hold (offsets 50-55) was appended in v4 after the v3 fields,
+so a reader that only consumes the first 52 bytes still parses correctly and can
+treat the hold as absent.
 
 | Offset | Size | Field | Type | Notes |
 | ------ | ---- | ----- | ---- | ----- |
@@ -48,7 +52,16 @@ in `app-android/.../ble/Tier1Gatt.kt`.
 | 47 | 1 | `heater_enabled` | `uint8` | `1` when the master heater enable is on (see `HeaterEnable`) |
 | 48 | 1 | `flushing` | `uint8` | `1` while a grouphead flush is in progress (see `Flush`) |
 | 49 | 1 | `thermoblock_manual` | `uint8` | `1` when an absolute manual thermoblock setpoint overrides `group + offset` (see `ThermoblockSetpoint`) |
-| 50 | 2 | `_pad` | `uint8[2]` | Reserved for future single-byte flags; readers must ignore |
+| 50 | 1 | `pressure_manual` | `uint8` | `1` when an operator-set pressure hold overrides the selected profile (see `PressureSetpoint`) |
+| 51 | 1 | `_pad` | `uint8[1]` | Reserved; keeps the trailing float aligned |
+| 52 | 4 | `pressure_setpoint_bar` | `float32` | The held pressure while `pressure_manual` is `1`; `NaN` otherwise |
+| 56 | 4 | `profile_elapsed_sec` | `float32` | Position along the running brew profile's own timeline; `NaN` when no profile is driving the pump |
+
+`profile_elapsed_sec` is not the shot clock: a phase that ends early on its
+`stopPressureAbove` jumps the position straight to the next phase's start, so the
+value tracks where the machine actually sits on the profile's published curve.
+It is clamped to the profile's total duration, since the final phase holds until
+the operator ends the shot.
 
 #### Fault codes
 
@@ -108,7 +121,13 @@ write, brew, or heater re-enable); brewing continuously refreshes it.
 ### Characteristic `BrewControl` — `a7b3c210-0006-4000-8000-000000000001`
 
 - **Properties:** WRITE
-- **Payload:** 1 byte — `1` starts a manual shot, `0` stops it.
+- **Payload:** 1 byte — `0` stops the shot, `1` starts a manual shot, `2` starts
+  a profile shot.
+
+A manual shot always runs the plain pre-infusion + pressure-ramp program, even
+when a brew profile is loaded; a profile shot runs the loaded profile's phase
+program (and falls back to the plain program when none is loaded). The choice is
+latched at shot start. Any other non-zero value behaves like `2`.
 
 Independent of the brew switch: a wired switch and the app can each start the
 timer. `brew_source` in `MachineState` reports which one is active.
@@ -159,6 +178,84 @@ clears the override and returns to `group + offset`. Writing the
 clamped to `[minBrewTempC, maxSafeTempC - 5]`, echoed back on the same
 characteristic, persisted to NVS, and reflected by the `thermoblock_manual`
 flag in `MachineState`.
+
+### Characteristic `PumpRamp` — `a7b3c210-000b-4000-8000-000000000001`
+
+- **Properties:** READ, WRITE
+- **Payload:** 4-byte `float32`, pump pressure-ramp (soft-start) time in seconds.
+
+Clamped to `[0, 15]` and persisted (key `pumpRamp`, default `0`). A positive
+value gives the pump a softer pressure start to reduce puck channeling: because
+the vibration pump sits on a zero-cross SSR (no phase dimming), the firmware
+time-proportions the pump SSR (~10 Hz slow-PWM), raising the duty from ~30 % up
+to 100 % across this many seconds measured from shot start (which also gentles
+the initial pre-infusion push). At full duty the SSR is driven continuously. A
+grouphead `Flush` always runs the pump at full duty regardless of this value.
+`0` disables the ramp (full pressure immediately). Echoed back on the same
+characteristic.
+
+### Characteristic `BrewProfile` — `a7b3c210-000c-4000-8000-000000000001`
+
+- **Properties:** READ, WRITE
+- **Payload:** variable-length little-endian blob (a pressure/flow profile).
+
+Selects a bundled espresso pressure/flow profile (curated in the app from the
+[gaggimate](https://github.com/jniebuhr/gaggimate) and
+[gaggiuino](https://github.com/Zer0-bit/gaggiuino) projects) for the firmware to
+execute by duty-cycling the pump. When a profile is active it replaces the
+built-in pre-infusion + `PumpRamp` behaviour for the whole shot.
+
+Layout — an 8-byte header followed by `phaseCount` × 28-byte phase records:
+
+| Offset | Type       | Field         | Notes                                           |
+| ------ | ---------- | ------------- | ----------------------------------------------- |
+| 0      | `u8`       | `version`     | `1`                                             |
+| 1      | `u8`       | `phaseCount`  | number of phase records that follow (max 12)    |
+| 2      | `u8[2]`    | reserved      | `0`                                             |
+| 4      | `float32`  | `temperature` | profile's recommended brew temp °C (advisory)   |
+
+Each phase record (28 bytes):
+
+| Offset | Type      | Field               | Notes                                          |
+| ------ | --------- | ------------------- | ---------------------------------------------- |
+| 0      | `u8`      | `mode`              | `0` pressure (bar), `1` flow (ml/s)            |
+| 1      | `u8`      | `curve`             | `0` instant, `1` linear, `2` ease              |
+| 2      | `u8`      | `valveOpen`         | `1` pump/valve run, `0` closed pause (bloom)   |
+| 3      | `u8`      | reserved            | `0`                                            |
+| 4      | `float32` | `targetStart`       | target at phase start                          |
+| 8      | `float32` | `targetEnd`         | target after the transition                    |
+| 12     | `float32` | `transitionSec`     | ramp time from start → end                     |
+| 16     | `float32` | `durationSec`       | total phase length                             |
+| 20     | `float32` | `restriction`       | limit on the other variable (0 = none)         |
+| 24     | `float32` | `stopPressureAbove` | early-exit pressure in bar (0 = time only)     |
+
+Phases run in order; a phase ends after `durationSec` or early when
+`stopPressureAbove` is met on the transducer, and the last phase holds until the
+operator ends the shot. Pressure phases close a coarse loop on the transducer
+(feedforward + P trim); flow phases run open-loop (no flow sensor) with
+`restriction` as a soft pressure cap. A payload with `phaseCount == 0`, an
+unknown `version`, or shorter than one phase clears the profile. Persisted to
+NVS (key `brewProf`) so the selection survives a reboot; the app also re-sends it
+on connect.
+
+### Characteristic `PressureSetpoint` — `a7b3c210-000d-4000-8000-000000000001`
+
+- **Properties:** READ, WRITE
+- **Payload:** `float32` bar
+
+Pins a shot at a fixed brew pressure instead of running the selected
+`BrewProfile`, the same way `ThermoblockSetpoint` pins the block instead of
+following `group + offset`. Writing a positive value holds that pressure for the
+whole shot and outranks any active profile; writing `0` (or `NaN`) clears the
+hold and hands the shot back to the profile / `PumpRamp` behaviour. A grouphead
+`Flush` always runs at full duty and ignores the hold.
+
+Duty comes from the firmware's measured pump curve (feedforward) plus the same
+closed-loop trim the profile engine's pressure phases use, so the achievable
+range is bounded by what the pump was characterised to deliver; the value is
+clamped to 12 bar. Echoed back on the same characteristic, persisted to NVS (key
+`pManual`), and reflected by `pressure_manual` / `pressure_setpoint_bar` in
+`MachineState`.
 
 ## Security (Tier 2 MVP)
 

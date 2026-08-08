@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 
 #include "control/pid.h"
@@ -97,17 +98,23 @@ public:
 
     // Shot timer: brewing is true while a manual shot is active over BLE.
     // brewSource: 0 idle, 1 manual (app).
-    void setManualBrew(bool on);
+    //
+    // `useProfile` picks what shapes the pump for this shot: true runs the
+    // loaded brew profile, false runs the plain pre-infusion + soft-start ramp
+    // even when a profile is loaded, so the app can offer a manual pull and a
+    // profile pull as separate buttons without rewriting the stored profile.
+    // Latched at shot start and ignored when stopping.
+    void setManualBrew(bool on, bool useProfile = true);
     bool brewing() const { return brewing_; }
     uint8_t brewSource() const { return brewSource_; }
     uint32_t shotElapsedMs(uint32_t nowMs) const;
 
-    // Grouphead flush: pulses the pump for `kFlushDurationMs` (see .cpp) with
-    // the relief valve held closed so water actually flows through the shower
-    // screen instead of dumping to the drip tray. Independent of `brewing_`,
-    // does not run the shot timer, does not honour pre-infusion. Calling while
-    // already flushing restarts the countdown; calling during a shot is a
-    // no-op (the shot owns the pump).
+    // Grouphead flush: pulses the pump (and opens the brew valve) for
+    // `kFlushDurationMs` (see .cpp) with the relief valve held closed so water
+    // actually flows through the shower screen instead of dumping to the drip
+    // tray. Independent of `brewing_`, does not run the shot timer, does not
+    // honour pre-infusion. Calling while already flushing restarts the
+    // countdown; calling during a shot is a no-op (the shot owns the pump).
     void startFlush(uint32_t nowMs);
     void stopFlush();
     bool flushing() const { return flushing_; }
@@ -123,6 +130,39 @@ public:
     float preinfusionSeconds() const { return preinfusionSec_; }
     uint8_t preinfusionPhase() const { return preinfusionPhase_; }
 
+    // Pump pressure-ramp (soft start): time-proportions the pump SSR (driven
+    // independently of the brew valve, see `pumpRelay`/`brewValveRelay` on
+    // MachineProfile) so a vibration pump builds pressure gradually over the
+    // first `seconds` of a shot instead of slamming to full flow, reducing
+    // puck channeling. Duty rises from a low floor to 100 % across the ramp;
+    // 0 disables it (the pump runs at full flow from the start). Never
+    // applies to a grouphead flush.
+    void setPumpRampSeconds(float seconds);
+    float pumpRampSeconds() const { return pumpRampSec_; }
+
+    // Brew pressure/flow profile ---------------------------------------------
+    // A profile is a sequence of phases (transcribed in the app from the
+    // gaggimate/gaggiuino projects) that shape the pump over a shot. When one is
+    // active it replaces the pre-infusion + pump-ramp behaviour: during a shot
+    // the phases run in order, each ramping its target (bar for a PRESSURE
+    // phase, ml/s for a FLOW phase) over its transition then holding it, while
+    // the pump is duty-cycled to chase it -- pressure phases close a coarse loop
+    // on the transducer, flow phases run open-loop (no flow sensor) with the
+    // phase's pressure limit as a soft cap. `data`/`len` is the BLE blob (see
+    // tier1_gatt.h); an empty / zero-phase blob clears the profile.
+    void setBrewProfile(const uint8_t* data, size_t len);
+    void clearBrewProfile();
+    bool brewProfileActive() const { return profileActive_; }
+    uint8_t brewProfilePhaseCount() const { return profilePhaseCount_; }
+    uint8_t brewProfilePhaseIndex() const { return profilePhaseIndex_; }
+
+    // Position along the profile's own timeline, in seconds: the durations of
+    // the finished phases plus the time spent in the current one. It is not the
+    // shot clock, because a phase that hits its stopPressureAbove ends early and
+    // jumps the position to the next phase's start. NaN whenever a profile is
+    // not currently driving the pump.
+    float brewProfileElapsedSec(uint32_t nowMs) const;
+
     // Relief/3-way vent valve. Default CLOSED (de-energised): it energises open
     // only for a brief vent pulse (kPostShotVentMs) right after a shot ends, to
     // relieve puck/line pressure. It stays closed at idle, while the block is
@@ -136,6 +176,28 @@ public:
     // transducer is bound or the reading is out of range.
     float pressureBar() const { return pressureBar_; }
     bool pressureOk() const { return pressureOk_; }
+
+    // Manual brew-pressure hold. When set, a shot chases this pressure for its
+    // whole duration instead of running the selected brew profile (the same
+    // relationship the manual thermoblock setpoint has with group + offset), so
+    // the app can pin a flat pressure without editing profiles. Duty comes from
+    // the measured pump curve plus the same closed-loop trim the profile engine
+    // uses. Passing a non-positive value (or NaN) clears the hold. Never applies
+    // to a grouphead flush, which always runs at full flow.
+    void setManualPressureBar(float bar);
+    void clearManualPressure();
+    bool pressureManualActive() const { return manualPressureActive_; }
+    float manualPressureBar() const { return manualPressureBar_; }
+
+    // Open-loop pump bench. Holds the pump at a fixed duty (0..1) with the brew
+    // valve open, so the phase dimmer's conduction angle can be characterised
+    // against the pressure transducer. Refuses while a shot or flush owns the
+    // pump, and either of those starting later reclaims it. Always expires after
+    // `durationMs` (capped) so a lost host cannot leave the pump running dry.
+    void startPumpBench(uint32_t nowMs, float duty, uint32_t durationMs);
+    void stopPumpBench();
+    bool pumpBenchActive() const { return pumpBench_.active; }
+    float pumpBenchDuty() const { return pumpBench_.duty; }
 
     // Clears a latched fault (e.g. after the operator inspects the sensor
     // wiring). Does not modify the setpoint. Note: an overtemp trip clears
@@ -194,7 +256,10 @@ private:
     void updateBrewState(uint32_t nowMs);
     void updatePreinfusion(uint32_t nowMs);
     void updateFlush(uint32_t nowMs);
-    void updateBrewRelay();
+    void updatePumpAndBrewValve(uint32_t nowMs);
+    void updateProfileExecution(uint32_t nowMs);
+    void applyPumpDuty(uint32_t nowMs, float duty);
+    float pressureHoldDuty(float targetBar) const;
     void updateReliefValve(uint32_t nowMs);
     void updatePressure();
     void updateHeaterTimeout(uint32_t nowMs);
@@ -243,13 +308,42 @@ private:
     // Shot timer
     bool brewing_ = false;
     bool manualBrew_ = false;
+    bool brewUseProfile_ = true;  // latched at shot start (see setManualBrew)
     uint8_t brewSource_ = 0;
     uint32_t shotStartMs_ = 0;
 
     // Pre-infusion (see setPreinfusionSeconds)
     float preinfusionSec_ = 2.0f;
     uint8_t preinfusionPhase_ = 0;  // 0 none/brewing, 1 pre-infuse, 2 bloom pause
+
+    // Pump pressure-ramp / soft start (see setPumpRampSeconds). 0 disables it.
+    // The window fields drive the time-proportional (slow-PWM) pump SSR while
+    // the ramp duty is below 100 %.
+    float pumpRampSec_ = 0.0f;
+    uint32_t pumpWindowStartMs_ = 0;
+    uint32_t pumpWindowOnMs_ = 0;
     uint32_t preinfusionPhaseStartMs_ = 0;
+
+    // Brew profile (see setBrewProfile). A shot with profileActive_ runs the
+    // phase program instead of the pre-infusion/pump-ramp path.
+    static constexpr uint8_t kMaxProfilePhases = 12;
+    struct ProfilePhaseRt {
+        uint8_t mode = 0;      // 0 pressure (bar), 1 flow (ml/s)
+        uint8_t curve = 0;     // 0 instant, 1 linear, 2 ease
+        bool valveOpen = true;
+        float targetStart = 0.0f;
+        float targetEnd = 0.0f;
+        float transitionSec = 0.0f;
+        float durationSec = 0.0f;
+        float restriction = 0.0f;       // limit on the other variable (0 = none)
+        float stopPressureAbove = 0.0f;  // early-exit pressure (0 = time only)
+    };
+    ProfilePhaseRt profilePhases_[kMaxProfilePhases];
+    uint8_t profilePhaseCount_ = 0;
+    bool profileActive_ = false;
+    float profileTempC_ = 0.0f;         // profile's recommended brew temp (informational)
+    uint8_t profilePhaseIndex_ = 0;     // phase currently executing during a shot
+    uint32_t profilePhaseStartMs_ = 0;  // start of the current phase
 
     // Grouphead flush window (see startFlush)
     bool flushing_ = false;
@@ -264,6 +358,10 @@ private:
     float pressureBar_ = NAN;
     bool pressureOk_ = false;
 
+    // Manual brew-pressure hold (see setManualPressureBar)
+    bool manualPressureActive_ = false;
+    float manualPressureBar_ = NAN;
+
     uint32_t lastPidMs_ = 0;
     uint32_t windowStartMs_ = 0;
     uint32_t windowOnTimeMs_ = 0;
@@ -275,6 +373,14 @@ private:
         float abortTempC = 0.0f;
         uint32_t startMs = 0;
     } tuning_;
+
+    // Open-loop pump bench (see startPumpBench)
+    struct PumpBenchState {
+        bool active = false;
+        float duty = 0.0f;
+        uint32_t durationMs = 0;
+        uint32_t startMs = 0;
+    } pumpBench_;
 
     struct CalibrationState {
         bool active = false;
