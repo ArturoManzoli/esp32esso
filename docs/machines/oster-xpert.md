@@ -78,17 +78,20 @@ Wiring diagram lives at `hardware/oster-xpert/tier-1-wiring.md`.
 
 ## Tier 2 install plan (group-referenced temperature)
 
-Tier 2 splits sensing into two probes: one on the **thermoblock** (inner/safety
-loop) and one **thermocouple at the portafilter/group** to measure the water at
-the puck. The user setpoint becomes the **cup** target, and the firmware runs the
-thermoblock hotter by a phone-tunable amount to compensate for the heat lost over
-the ~20 cm path (PTFE tubing + valves):
+Tier 2 splits sensing into two probes: one on the **thermoblock** (safety probe)
+and one **thermocouple at the portafilter/group** to measure the water at the
+puck. The user setpoint becomes the **cup** target, and the PID closes **directly
+on the group probe** so the loop corrects the ~20 cm transport loss (PTFE tubing
++ valves) by measurement instead of by a hand-tuned offset.
 
-`thermoblockSetpoint = groupSetpoint + offset`,
+The thermoblock is not a second setpoint but a **ceiling**: its duty is rolled
+off as it approaches `groupSetpoint + maxThermoblockOffsetC` (50 °C on this
+machine), below the hard overtemp cut. Setting an absolute **manual thermoblock
+setpoint** from the app hands control back to the block probe, and the loop falls
+back to block-direct control on its own if the group probe is missing or faulted.
 
-with the offset a signed ±20 °C slider (or an absolute manual thermoblock
-setpoint that overrides it), clamped to the safety cap. An optional brew-switch
-tap auto-starts the shot timer (a manual button in the app works without it).
+An optional brew-switch tap auto-starts the shot timer (a manual button in the
+app works without it).
 
 ### Thermoblock sensor: two thermocouples (recommended) vs. the stock NTC
 
@@ -202,7 +205,9 @@ the host requirements once: `pip install -r tools/requirements.txt`.
 
 - The thermoblock has very low thermal mass relative to a Gaggia boiler,
   so PID overshoot is the main risk. The hard cut at `maxSafeTempC` (160 C)
-  is intentionally tight.
+  is intentionally tight. An overtemp trip holds the heater off and clears
+  itself once the block has coasted back down to 90 C, so a transient
+  overshoot does not need a manual reset.
 - If the chassis-ground bonding is found to be missing, see the warning
   above. This is more common on entry-tier Chinese-OEM machines than on
   the Gaggia family.

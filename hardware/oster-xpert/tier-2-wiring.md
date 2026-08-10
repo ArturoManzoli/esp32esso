@@ -1,6 +1,6 @@
 # Oster Xpert - Tier 2 wiring
 
-Tier 2 turns the single-sensor Tier 1 rig into a **two-sensor cascade**, with an
+Tier 2 turns the single-sensor Tier 1 rig into a **two-probe** one, with an
 optional brew-line **pressure transducer** and a **brew-switch tap** for the
 auto shot timer:
 
@@ -16,8 +16,10 @@ auto shot timer:
   into an ADC pin. The firmware reads it live (spike/ripple-filtered) and graphs
   it in the app when the `ESP32ESSO_PRESSURE_ADC` build flag is set.
 - **Relief valve (optional):** a solenoid on a second SSR that the firmware
-  drives 3-way style — held **open (venting to the drip tray) while idle**,
-  **closed the instant a shot starts**, and reopened when it ends.
+  drives 3-way style. It rests **closed (de-energised)** so the coil does not
+  hum through the whole idle, and is pulsed **open for 4 s after a shot** to
+  vent the puck. It stays closed while brewing, while any other operation runs,
+  and whenever the thermoblock is above 80 °C.
 
 The heater/SSR from Tier 1 is unchanged. Sensor **calibration** (fixed-point and
 common-heater methods, with results) lives in its own doc:
@@ -44,9 +46,9 @@ common-heater methods, with results) lives in its own doc:
 
 The stock NTC sits on the thermoblock. Water then travels ~20 cm through PTFE
 tubing and valves to the portafilter, losing heat along the way. Tier 2
-measures the water temperature **at the group** and makes that the target: the
-firmware runs the thermoblock hotter by a tunable amount so the cup lands at
-your setpoint. See the cascade math in
+measures the water temperature **at the group** and closes the PID on it, so
+the transport loss is corrected by measurement. The thermoblock probe stays as
+the safety probe and as the ceiling the heater rolls off against. See
 [`../../protocol/ble/tier2.md`](../../protocol/ble/tier2.md) and
 `firmware/src/control/temperature_loop.cpp`.
 
@@ -346,8 +348,9 @@ SSR DC - ── ESP32 GND
 ## After first boot
 
 - The app shows two temperatures: **group** (the target) and **thermoblock**.
-- Adjust the **thermoblock offset** (signed ±20 °C) until the group holds your
-  setpoint during a shot; `0` runs the thermoblock at the group setpoint.
+  Set the group target and the loop drives the thermoblock as hard as its
+  ceiling allows to get there; tap the thermoblock reading to pin it to a fixed
+  value instead if you want to drive the block directly.
 - Pull a shot (button or switch) and confirm the **shot timer** runs and the
   **brew graph** traces both temperatures.
 - **`-ntc` build only:** before trusting the thermoblock reading, calibrate the

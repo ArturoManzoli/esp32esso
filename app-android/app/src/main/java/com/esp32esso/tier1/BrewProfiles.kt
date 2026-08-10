@@ -20,9 +20,9 @@ import java.nio.ByteOrder
 // temperature per phase are pinned to their starting temperature, the only one
 // `temperatureC` can express.
 //
-// Execution reality on this hardware: the pump is a vibration pump on a
-// zero-cross SSR, so it can only be time-proportioned (slow-PWM), and there is
-// no flow sensor. PRESSURE phases are held with a coarse closed loop on the
+// Execution reality on this hardware: the pump is a vibration pump on an AC
+// phase dimmer, so power is set by conduction angle, and there is no flow
+// sensor. PRESSURE phases are held with a coarse closed loop on the
 // brew-line transducer (feedforward + P trim); FLOW phases are open-loop
 // (target ml/s mapped to a pump duty), with the phase's pressure limit used as
 // a soft cap when the transducer is present. So a profile's *shape* is honoured

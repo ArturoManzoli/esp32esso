@@ -36,15 +36,22 @@ See [`CREDITS.md`](CREDITS.md) for full attribution.
 
 ## What you can do with it
 
+Working today (Tiers 1-3):
+
 - Hold brew temperature within ~1 C of setpoint using closed-loop PID on the
   existing heater, instead of relying on the stock bang-bang thermostat.
-- Monitor pressure, flow, weight, shot time, and temperature live from your
-  phone over Bluetooth Low Energy.
-- Profile pressure and flow during the shot (pre-infusion, ramp, decline,
-  blooming, etc.).
-- Stop-on-weight / predictive scales so the shot ends at the exact yield you
-  want.
-- Save, edit, import, and share shot profiles from the companion Android app.
+- Monitor temperature, brew pressure, and shot time live from your phone over
+  Bluetooth Low Energy.
+- Run pressure profiles (pre-infusion, ramp, decline, blooming) on a TRIAC
+  dimmer, picked from a bundled library transcribed from gaggimate, gaggiuino,
+  and Decent, or hold one pressure for the whole shot.
+- Review, rate, and edit past shots in the app's brew history.
+
+On the roadmap (Tier 4):
+
+- Flow and weight measurement, with stop-on-weight and predictive yield.
+- Editing, importing, and sharing shot profiles.
+- OTA updates and a multi-machine profile library.
 
 ## Hardware install tiers
 
@@ -127,13 +134,14 @@ pio run -e esp32-oster-xpert -t upload      # classic ESP32-WROOM
 pio device monitor
 ```
 
-The Tier 1 Android companion app lives under [`app-android/`](app-android/).
-Build and install it from Android Studio (see [`app-android/README.md`](app-android/README.md)),
-then connect over BLE to set the brew temperature and watch live heater state.
+The Android companion app lives under [`app-android/`](app-android/). Build and
+install it from Android Studio (see [`app-android/README.md`](app-android/README.md)),
+then connect over BLE to set the brew temperature, run a pressure profile, and
+watch the live shot graph.
 
 ## Screenshots
 
-<img width="2560" height="1600" alt="Screenshot_20260709-150936" src="https://github.com/user-attachments/assets/5eb403be-af7c-4668-9949-58a8f6d9fedf" />
+![Esp32esso Android app - live temperatures, pressure, brew graph and profile](docs/images/dashboard.jpg)
 
 ## Contributing
 

@@ -68,6 +68,27 @@ how to calibrate it (fixed-point and common-heater methods, with results) is in
 Documented in [`tier-2-wiring.md`](tier-2-wiring.md); sensor calibration is in
 [`tier-2-calibration.md`](tier-2-calibration.md).
 
-## Tier 3 / 4
+## Tier 3 - Pressure control
 
-Not started. Documented as those tiers come online for this machine.
+Splits the single pump/valve output in two: an **AC phase dimmer** drives the
+vibration pump so the firmware can hold a pressure or run a profile, and the
+brew valve keeps its own SSR. The Tier 2 pressure transducer stops being
+optional here, since it closes the loop.
+
+### BOM (machine-specific additions)
+
+| Qty | Part | Notes |
+| --- | ---- | ----- |
+| 1 | AC dimmer module, 4 A, 1 channel, 3.3/5 V logic (RobotDyn-style **Standard phase-control** variant) | Replaces the pump SSR. `DIM` on GPIO 32 (WROOM) / GPIO 6 (S3), `Z-C` on GPIO 33 (WROOM) / GPIO 9 (S3). Not the DimmerLink variant, which speaks its own protocol |
+| 1 | Ratiometric pressure transducer, 0–12 bar, G1/8" | Listed as optional under Tier 2; **required** here |
+| 1 | Second SSR (or relay) for the brew valve | The pump and the valve are driven independently from Tier 3 on |
+
+### Wiring and calibration
+
+Wiring is in [`tier-2-wiring.md`](tier-2-wiring.md) (pump/valve section); the
+measured duty-to-pressure sweep the firmware feeds forward from is in
+[`pump-dimmer-calibration.md`](pump-dimmer-calibration.md).
+
+## Tier 4
+
+Not started. Documented as that tier comes online for this machine.

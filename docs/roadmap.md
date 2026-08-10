@@ -36,12 +36,12 @@ without WiFi.
 - firmware: BLE peripheral service, telemetry + setpoint write (DONE)
 - Android app (Kotlin / Jetpack Compose): Tier 1 connect, live temp/heater,
   setpoint slider (DONE)
-- Tier 2 dual-sensor cascade: a second thermocouple at the portafilter, with
-  the user setpoint targeting the cup and the thermoblock driven hotter to
-  overcome the transport loss; phone-tunable gain (DONE)
+- Tier 2 dual sensing: a second thermocouple at the portafilter, with the user
+  setpoint targeting the cup and the PID closing directly on the group probe,
+  the thermoblock acting as a ceiling (DONE)
 - firmware: auto shot timer (brew-switch sense) plus manual start/stop (DONE)
-- Android app: live brew graph, dual-temp + gain + settings, dark theme (DONE)
-- firmware: pressure-transducer driver (moved to Tier 3 with the pump work)
+- Android app: live brew graph, dual-temp + settings, dark theme (DONE)
+- firmware: pressure-transducer driver (DONE, with the Tier 3 pump work)
 - second machine profile to validate the abstraction layer
 
 ## Stage 3 - Pressure / flow profiling + Tier 3
@@ -49,11 +49,19 @@ without WiFi.
 **Goal**: profiled shots with arbitrary pressure or flow curves, edited
 from the phone.
 
-- zero-cross detector + TRIAC dimmer pump driver on a dedicated FreeRTOS
-  task pinned to core 0
+- zero-cross detector + TRIAC dimmer pump driver, phase angle scheduled from
+  the zero-cross ISR off a hardware timer (DONE)
+- pump characterisation sweep mapping dimmer duty to brew pressure, used as
+  the feedforward term of the pressure loop (DONE)
 - profile data model (phases, transitions, limits) shared by firmware +
-  app via the GATT contract
-- live shot graphing and profile editor in the Android app
+  app via the GATT contract (DONE)
+- bundled profile library transcribed from gaggimate, gaggiuino and Decent,
+  plus a manual fixed-pressure hold (DONE)
+- live shot graphing with a profile playhead in the Android app (DONE)
+- profile editor in the Android app (the library is selectable, not yet
+  editable)
+- flow measurement, so flow-targeted phases run closed-loop instead of
+  against the pressure feedforward
 
 ## Stage 4 - Ecosystem + Tier 4
 

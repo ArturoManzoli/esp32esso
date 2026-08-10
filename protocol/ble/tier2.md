@@ -1,9 +1,10 @@
 # Tier 2 BLE GATT contract
 
 Supersedes [`tier1.md`](tier1.md). Same service UUID and same connectionless,
-open-write model, but the `MachineState` payload grows to carry the dual-sensor
-cascade telemetry and the brew-graph lanes, and three new characteristics add
-the cascade gain, the tunable settings, and the manual shot trigger.
+open-write model, but the `MachineState` payload grows to carry the dual-probe
+telemetry and the brew-graph lanes, and further characteristics add the derived
+thermoblock target, the tunable settings, the manual shot trigger, and the
+Tier 3 pressure controls (pump ramp, brew profile, pressure hold).
 
 The Android app and firmware must stay byte-compatible with this document.
 Firmware structs live in `firmware/src/ble/tier1_gatt.h`; the app mirror lives
@@ -90,11 +91,12 @@ keeps the brew target in a sane espresso band; the steam target is separate.
 - **Properties:** READ, WRITE
 - **Payload:** 4-byte `float32`, thermoblock setpoint offset in °C.
 
-Signed value added to the group setpoint to produce the inner PID target:
-`thermoblockSetpoint = groupSetpoint + offset`. Positive offsets over-drive
-the thermoblock to compensate transport loss to the puck; negative offsets
-pull it below the cup target (rarely useful, but not forbidden). Clamped to
-`[-maxThermoblockOffsetC, +maxThermoblockOffsetC]` (±20 °C on Oster) on top
+Signed value added to the group setpoint to produce the derived thermoblock
+target: `thermoblockSetpoint = groupSetpoint + offset`. With a healthy group
+probe the PID closes directly on the group and this target is only reported;
+it becomes the actual control target when the loop falls back to block-direct
+control (group probe missing or faulted). Clamped to
+`[-maxThermoblockOffsetC, +maxThermoblockOffsetC]` (±50 °C on Oster) on top
 of the hard safety cap, and persisted (key `tbOffset`, default per-profile).
 UUID inherited from the v2 `Gain` characteristic; v3 clients must not treat
 the value as a unitless gain.
@@ -185,12 +187,11 @@ flag in `MachineState`.
 - **Payload:** 4-byte `float32`, pump pressure-ramp (soft-start) time in seconds.
 
 Clamped to `[0, 15]` and persisted (key `pumpRamp`, default `0`). A positive
-value gives the pump a softer pressure start to reduce puck channeling: because
-the vibration pump sits on a zero-cross SSR (no phase dimming), the firmware
-time-proportions the pump SSR (~10 Hz slow-PWM), raising the duty from ~30 % up
-to 100 % across this many seconds measured from shot start (which also gentles
-the initial pre-infusion push). At full duty the SSR is driven continuously. A
-grouphead `Flush` always runs the pump at full duty regardless of this value.
+value gives the pump a softer pressure start to reduce puck channeling: the
+firmware raises the AC phase dimmer's duty from ~30 % up to 100 % across this
+many seconds measured from shot start (which also gentles the initial
+pre-infusion push). A grouphead `Flush` always runs the pump at full duty
+regardless of this value.
 `0` disables the ramp (full pressure immediately). Echoed back on the same
 characteristic.
 

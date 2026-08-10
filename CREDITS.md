@@ -36,6 +36,26 @@ directly.
 | License | CC BY-NC 4.0 | GPL-3.0-or-later |
 | Install model | One build path per machine | Tiered (Tier 1 temp -> Tier 4 full bar) so users can stop at any complexity level |
 
+### GaggiMate and Decent
+
+The bundled profile library also draws on
+[GaggiMate](https://github.com/jniebuhr/gaggimate) by
+[jniebuhr](https://github.com/jniebuhr) and on the profiles published with
+[the Decent DE1 app](https://github.com/decentespresso/de1app).
+
+## Bundled brew profiles
+
+The profiles shipped in the Android app
+(`app-android/.../tier1/BrewProfiles.kt`) are **transcribed**, not copied: the
+published shape of each recipe (phase order, target pressure or flow, duration,
+brew temperature) is re-expressed in this project's own phase model, with the
+originating project named on every entry in the app's selector. No upstream
+source file, schema, or asset is redistributed here. Where a profile relies on
+hardware this machine lacks (a scale, a flow meter, per-phase temperature
+steps), the transcription approximates it, so an Esp32esso shot is a rendition
+of the author's intent rather than a faithful reproduction. Credit for the
+recipes belongs to their authors and the communities around those projects.
+
 ## Standing on the shoulders of
 
 - the PlatformIO and Arduino-ESP32 maintainers
