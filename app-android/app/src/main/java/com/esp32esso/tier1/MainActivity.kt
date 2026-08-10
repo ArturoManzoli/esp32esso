@@ -183,6 +183,7 @@ class MainActivity : ComponentActivity() {
                         onSetpointChanged = viewModel::applySetpoint,
                         onThermoblockSetpointChanged = viewModel::applyThermoblockSetpoint,
                         onPressureSetpointChanged = viewModel::applyPressureSetpoint,
+                        onTareScale = viewModel::tareScale,
                         onBrewToggle = viewModel::setBrewing,
                         onProfileBrewToggle = viewModel::setProfileBrewing,
                         onHeaterToggle = viewModel::setHeaterEnabled,

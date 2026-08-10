@@ -228,6 +228,7 @@ void TemperatureLoop::tick(uint32_t nowMs) {
     updatePumpAndBrewValve(nowMs);
     updateReliefValve(nowMs);
     updatePressure();
+    updateScale();
     updateHeaterTimeout(nowMs);
     if (cal_.active) {
         runCalibrationStep(nowMs);
@@ -811,6 +812,41 @@ void TemperatureLoop::updatePressure() {
     const float alpha =
         kPressAlphaMin + (kPressAlphaMax - kPressAlphaMin) * responsiveness;
     pressureBar_ += alpha * delta;
+}
+
+void TemperatureLoop::updateScale() {
+    if (profile_ == nullptr || profile_->scale == nullptr) {
+        weightLeftG_ = NAN;
+        weightRightG_ = NAN;
+        return;
+    }
+    // Only touch the amps when a conversion is already waiting: at 10 SPS most
+    // ticks have nothing new, and a blocking wait here would stall the PID for
+    // most of a conversion period.
+    if (!profile_->scale->ready()) {
+        return;
+    }
+    int32_t left = 0;
+    int32_t right = 0;
+    if (!profile_->scale->readRaw(left, right)) {
+        return;
+    }
+    const auto& cal = profile_->scale->calibration();
+    weightLeftG_ = static_cast<float>(left - cal.offsetLeft) / cal.countsPerGramLeft;
+    weightRightG_ = static_cast<float>(right - cal.offsetRight) / cal.countsPerGramRight;
+}
+
+bool TemperatureLoop::tareScale() {
+    if (profile_ == nullptr || profile_->scale == nullptr) {
+        return false;
+    }
+    if (!profile_->scale->tare()) {
+        return false;
+    }
+    weightLeftG_ = 0.0f;
+    weightRightG_ = 0.0f;
+    activityPending_ = true;
+    return true;
 }
 
 void TemperatureLoop::updateHeaterTimeout(uint32_t nowMs) {

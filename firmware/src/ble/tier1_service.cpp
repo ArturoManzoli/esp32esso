@@ -72,6 +72,8 @@ MachineStateWire packState(uint32_t nowMs) {
     state.pressure_bar = NAN;
     state.flow_mls = NAN;
     state.weight_g = NAN;
+    state.weight_left_g = NAN;
+    state.weight_right_g = NAN;
     if (g_loop != nullptr) {
         state.thermoblock_temp_c = g_loop->lastTempCelsius();
         state.group_temp_c = g_loop->groupTempCelsius();
@@ -95,6 +97,9 @@ MachineStateWire packState(uint32_t nowMs) {
                                           ? g_loop->manualPressureBar()
                                           : NAN;
         state.profile_elapsed_sec = g_loop->brewProfileElapsedSec(nowMs);
+        state.weight_left_g = g_loop->weightLeftGrams();
+        state.weight_right_g = g_loop->weightRightGrams();
+        state.weight_g = g_loop->weightTotalGrams();
     }
     state.uptime_ms = nowMs;
     return state;
@@ -253,6 +258,18 @@ public:
         } else {
             g_loop->stopFlush();
         }
+    }
+};
+
+class ScaleTareCallbacks : public BLECharacteristicCallbacks {
+public:
+    void onWrite(BLECharacteristic* characteristic) override {
+        if (g_loop == nullptr || characteristic == nullptr) return;
+        const std::string& value = characteristic->getValue();
+        if (value.empty() || value[0] == 0) {
+            return;
+        }
+        Serial.printf("# scale_char: tare %s\n", g_loop->tareScale() ? "ok" : "failed");
     }
 };
 
@@ -507,6 +524,10 @@ void Tier1Service::begin(control::TemperatureLoop* loop,
         kPressureSetpointUuid,
         BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
     pressureSetpointChar->setCallbacks(new PressureSetpointCallbacks());
+
+    BLECharacteristic* scaleTareChar = service->createCharacteristic(
+        kScaleTareUuid, BLECharacteristic::PROPERTY_WRITE);
+    scaleTareChar->setCallbacks(new ScaleTareCallbacks());
 
     if (loop_ != nullptr) {
         writeBackFloat(setpointChar, loop_->setpointCelsius());

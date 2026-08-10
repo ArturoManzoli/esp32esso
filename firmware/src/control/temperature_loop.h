@@ -177,6 +177,17 @@ public:
     float pressureBar() const { return pressureBar_; }
     bool pressureOk() const { return pressureOk_; }
 
+    // Drip-tray scale, per cell and summed. NaN when no scale is bound or no
+    // sample has landed yet. The total is what holds regardless of where the cup
+    // sits; the per-cell figures are what make a bad corner or a dead cell
+    // visible instead of silently halving the reading.
+    float weightLeftGrams() const { return weightLeftG_; }
+    float weightRightGrams() const { return weightRightG_; }
+    float weightTotalGrams() const { return weightLeftG_ + weightRightG_; }
+
+    // Zeroes the tray. Returns false when there is no scale or no sample.
+    bool tareScale();
+
     // Manual brew-pressure hold. When set, a shot chases this pressure for its
     // whole duration instead of running the selected brew profile (the same
     // relationship the manual thermoblock setpoint has with group + offset), so
@@ -262,6 +273,7 @@ private:
     float pressureHoldDuty(float targetBar) const;
     void updateReliefValve(uint32_t nowMs);
     void updatePressure();
+    void updateScale();
     void updateHeaterTimeout(uint32_t nowMs);
     float computeThermoblockSetpoint() const;
     void latchFault(const char* reason);
@@ -357,6 +369,10 @@ private:
     // Brew-line pressure, filtered (see pressureBar())
     float pressureBar_ = NAN;
     bool pressureOk_ = false;
+
+    // Drip-tray scale, per cell (see weightLeftGrams())
+    float weightLeftG_ = NAN;
+    float weightRightG_ = NAN;
 
     // Manual brew-pressure hold (see setManualPressureBar)
     bool manualPressureActive_ = false;

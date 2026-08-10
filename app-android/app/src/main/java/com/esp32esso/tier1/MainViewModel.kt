@@ -258,6 +258,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun triggerFlush() = client.writeFlush(true)
     fun stopFlush() = client.writeFlush(false)
+    fun tareScale() = client.writeScaleTare()
 
     fun upsertBean(bean: BeanEntity) = viewModelScope.launch { repo.upsert(bean) }
     fun deleteBean(bean: BeanEntity) = viewModelScope.launch { repo.delete(bean) }

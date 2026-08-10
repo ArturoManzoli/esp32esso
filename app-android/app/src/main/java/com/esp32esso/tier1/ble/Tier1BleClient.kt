@@ -76,6 +76,7 @@ class Tier1BleClient(context: Context) {
     private var pumpRampCharacteristic: BluetoothGattCharacteristic? = null
     private var brewProfileCharacteristic: BluetoothGattCharacteristic? = null
     private var pressureSetpointCharacteristic: BluetoothGattCharacteristic? = null
+    private var scaleTareCharacteristic: BluetoothGattCharacteristic? = null
 
     private val history = ArrayDeque<GraphSample>()
 
@@ -169,6 +170,7 @@ class Tier1BleClient(context: Context) {
                 brewProfileCharacteristic = service.getCharacteristic(Tier1Gatt.brewProfileUuid)
                 pressureSetpointCharacteristic =
                     service.getCharacteristic(Tier1Gatt.pressureSetpointUuid)
+                scaleTareCharacteristic = service.getCharacteristic(Tier1Gatt.scaleTareUuid)
                 if (stateCharacteristic == null || setpointCharacteristic == null) {
                     fail("Missing Tier 2 characteristics")
                     return
@@ -353,6 +355,13 @@ class Tier1BleClient(context: Context) {
                 ),
             )
         }
+    }
+
+    // Zeroes the drip tray at its current load. Nothing is reflected optimistically:
+    // the next MachineState notification carries the tared reading.
+    fun writeScaleTare() {
+        val characteristic = scaleTareCharacteristic ?: return
+        writeChar(characteristic, byteArrayOf(1))
     }
 
     fun writeFlush(start: Boolean) {
@@ -586,6 +595,7 @@ class Tier1BleClient(context: Context) {
         pumpRampCharacteristic = null
         brewProfileCharacteristic = null
         pressureSetpointCharacteristic = null
+        scaleTareCharacteristic = null
         history.clear()
         writeWatchdog?.let { writeHandler.removeCallbacks(it) }
         writeWatchdog = null

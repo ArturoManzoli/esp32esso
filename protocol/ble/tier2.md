@@ -23,13 +23,14 @@ in `app-android/.../ble/Tier1Gatt.kt`.
 
 - **Properties:** READ, NOTIFY
 - **CCCD:** required for NOTIFY (standard `0x2902` descriptor)
-- **Payload:** 60-byte little-endian struct, pushed at 4 Hz, or 20 Hz while a
+- **Payload:** 68-byte little-endian struct, pushed at 4 Hz, or 20 Hz while a
   shot is being pulled or the open-loop tuning bench is active (for a smooth
   brew graph; still well within the negotiated 7.5-22.5 ms connection interval).
 
-The manual pressure hold (offsets 50-55) was appended in v4 after the v3 fields,
-so a reader that only consumes the first 52 bytes still parses correctly and can
-treat the hold as absent.
+Every version appends its fields after the previous ones: v4 the manual pressure
+hold (offsets 50-55), v5 `profile_elapsed_sec`, v6 the per-cell drip-tray
+weights. A reader that only consumes the first 52, 56 or 60 bytes still parses
+correctly and can treat the later fields as absent.
 
 | Offset | Size | Field | Type | Notes |
 | ------ | ---- | ----- | ---- | ----- |
@@ -39,7 +40,7 @@ treat the hold as absent.
 | 12 | 4 | `thermoblock_setpoint_c` | `float32` | Effective inner setpoint the PID chases: `group_setpoint_c + thermoblock_offset_c`, or the absolute manual setpoint when `thermoblock_manual` is `1`; clamped to safety |
 | 16 | 4 | `pressure_bar` | `float32` | Brew-line pressure, spike/ripple-filtered. `NaN` when no transducer is bound or the reading is out of range |
 | 20 | 4 | `flow_mls` | `float32` | Tier 3 stub; `NaN` until flow sensing exists |
-| 24 | 4 | `weight_g` | `float32` | Tier 4 stub; `NaN` until a scale is wired |
+| 24 | 4 | `weight_g` | `float32` | Drip-tray total (`weight_left_g + weight_right_g`); `NaN` until a scale is wired |
 | 28 | 4 | `thermoblock_offset_c` | `float32` | Signed °C offset added to the group setpoint; range clamped to the profile's `maxThermoblockOffsetC` (±20 °C on Oster) |
 | 32 | 4 | `shot_time_ms` | `uint32` | Elapsed shot time; `0` when not brewing |
 | 36 | 4 | `uptime_ms` | `uint32` | Firmware `millis()` snapshot |
@@ -57,12 +58,19 @@ treat the hold as absent.
 | 51 | 1 | `_pad` | `uint8[1]` | Reserved; keeps the trailing float aligned |
 | 52 | 4 | `pressure_setpoint_bar` | `float32` | The held pressure while `pressure_manual` is `1`; `NaN` otherwise |
 | 56 | 4 | `profile_elapsed_sec` | `float32` | Position along the running brew profile's own timeline; `NaN` when no profile is driving the pump |
+| 60 | 4 | `weight_left_g` | `float32` | Drip-tray left load cell alone; `NaN` when no scale is bound |
+| 64 | 4 | `weight_right_g` | `float32` | Drip-tray right load cell alone; `NaN` when no scale is bound |
 
 `profile_elapsed_sec` is not the shot clock: a phase that ends early on its
 `stopPressureAbove` jumps the position straight to the next phase's start, so the
 value tracks where the machine actually sits on the profile's published curve.
 It is clamped to the profile's total duration, since the final phase holds until
 the operator ends the shot.
+
+The cells are reported separately as well as summed because only the total is
+independent of where the cup sits on the tray, while the per-cell figures are
+what make a miswired or dead corner visible instead of silently halving the
+reading.
 
 #### Fault codes
 
@@ -257,6 +265,16 @@ range is bounded by what the pump was characterised to deliver; the value is
 clamped to 12 bar. Echoed back on the same characteristic, persisted to NVS (key
 `pManual`), and reflected by `pressure_manual` / `pressure_setpoint_bar` in
 `MachineState`.
+
+### Characteristic `ScaleTare` — `a7b3c210-000e-4000-8000-000000000001`
+
+- **Properties:** WRITE
+- **Payload:** 1 byte, any non-zero value tares
+
+Zeroes the drip-tray scale at its current load, storing a fresh offset per cell.
+The tare is held in RAM only, so it does not survive a reboot; the reading it
+produces comes back through `weight_g` / `weight_left_g` / `weight_right_g` in
+`MachineState`. A write with `0` or an empty payload is ignored.
 
 ## Security (Tier 2 MVP)
 

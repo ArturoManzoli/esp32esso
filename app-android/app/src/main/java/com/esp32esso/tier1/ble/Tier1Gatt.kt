@@ -30,13 +30,16 @@ object Tier1Gatt {
     // Manual brew-pressure hold (float bar); 0 clears it and returns the shot to
     // the selected profile.
     val pressureSetpointUuid: UUID = UUID.fromString("a7b3c210-000d-4000-8000-000000000001")
+    // Drip-tray scale tare; any non-zero byte zeroes the tray at its current load.
+    val scaleTareUuid: UUID = UUID.fromString("a7b3c210-000e-4000-8000-000000000001")
     // v3 payload size, still the minimum a notification must carry. v4 appends
-    // the manual pressure hold and v5 the running profile's position; parsing
-    // stays tolerant of any of the three lengths so a newer app keeps working
-    // against firmware that predates either field.
+    // the manual pressure hold, v5 the running profile's position and v6 the
+    // per-cell drip-tray weights; parsing stays tolerant of any of the four
+    // lengths so a newer app keeps working against firmware that predates a field.
     const val machineStateSize = 52
     const val machineStateSizeV4 = 56
     const val machineStateSizeV5 = 60
+    const val machineStateSizeV6 = 68
     const val settingsSize = 20
 }
 
@@ -68,6 +71,10 @@ data class MachineState(
     // Seconds into the running brew profile's own timeline (phases that ended
     // early on pressure skip ahead), or NaN when no profile is driving the pump.
     val profileElapsedSec: Float = Float.NaN,
+    // Drip-tray cells reported separately so a bad corner or a dead cell is
+    // visible instead of silently halving the total. NaN when no scale is bound.
+    val weightLeftG: Float = Float.NaN,
+    val weightRightG: Float = Float.NaN,
 ) {
     val faultLabel: String?
         get() = when (faultCode) {
@@ -107,6 +114,9 @@ data class MachineState(
             val pressureSetpoint = if (hasV4) b.float else Float.NaN
             val profileElapsed =
                 if (bytes.size >= Tier1Gatt.machineStateSizeV5) b.float else Float.NaN
+            val hasV6 = bytes.size >= Tier1Gatt.machineStateSizeV6
+            val weightLeft = if (hasV6) b.float else Float.NaN
+            val weightRight = if (hasV6) b.float else Float.NaN
             return MachineState(
                 thermoblockTempC = thermoblock,
                 groupTempC = group,
@@ -135,6 +145,8 @@ data class MachineState(
                 pressureManual = pressureManual != 0,
                 pressureSetpointBar = pressureSetpoint,
                 profileElapsedSec = profileElapsed,
+                weightLeftG = weightLeft,
+                weightRightG = weightRight,
             )
         }
     }

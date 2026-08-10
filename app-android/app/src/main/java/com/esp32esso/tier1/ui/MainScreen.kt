@@ -126,6 +126,7 @@ fun MainScreen(
     onSetpointChanged: (Float) -> Unit,
     onThermoblockSetpointChanged: (Float) -> Unit,
     onPressureSetpointChanged: (Float) -> Unit,
+    onTareScale: () -> Unit,
     onBrewToggle: (Boolean) -> Unit,
     onProfileBrewToggle: (Boolean) -> Unit,
     onHeaterToggle: (Boolean) -> Unit,
@@ -161,6 +162,7 @@ fun MainScreen(
             onSetpointChanged = onSetpointChanged,
             onThermoblockSetpointChanged = onThermoblockSetpointChanged,
             onPressureSetpointChanged = onPressureSetpointChanged,
+            onTareScale = onTareScale,
             onBrewToggle = onBrewToggle,
             onProfileBrewToggle = onProfileBrewToggle,
             onHeaterToggle = onHeaterToggle,
@@ -187,6 +189,7 @@ fun MainScreen(
             onSetpointChanged = onSetpointChanged,
             onThermoblockSetpointChanged = onThermoblockSetpointChanged,
             onPressureSetpointChanged = onPressureSetpointChanged,
+            onTareScale = onTareScale,
             onBrewToggle = onBrewToggle,
             onProfileBrewToggle = onProfileBrewToggle,
             onHeaterToggle = onHeaterToggle,
@@ -217,6 +220,7 @@ private fun MainScreenNarrow(
     onSetpointChanged: (Float) -> Unit,
     onThermoblockSetpointChanged: (Float) -> Unit,
     onPressureSetpointChanged: (Float) -> Unit,
+    onTareScale: () -> Unit,
     onBrewToggle: (Boolean) -> Unit,
     onProfileBrewToggle: (Boolean) -> Unit,
     onHeaterToggle: (Boolean) -> Unit,
@@ -262,6 +266,7 @@ private fun MainScreenNarrow(
             onSetGroupTarget = onSetpointChanged,
             onSetThermoblockTarget = onThermoblockSetpointChanged,
             onSetPressureTarget = onPressureSetpointChanged,
+            onTareScale = onTareScale,
         )
         ShotCard(
             machine = machine,
@@ -306,6 +311,7 @@ private fun MainScreenWide(
     onSetpointChanged: (Float) -> Unit,
     onThermoblockSetpointChanged: (Float) -> Unit,
     onPressureSetpointChanged: (Float) -> Unit,
+    onTareScale: () -> Unit,
     onBrewToggle: (Boolean) -> Unit,
     onProfileBrewToggle: (Boolean) -> Unit,
     onHeaterToggle: (Boolean) -> Unit,
@@ -365,6 +371,7 @@ private fun MainScreenWide(
                     onSetGroupTarget = onSetpointChanged,
                     onSetThermoblockTarget = onThermoblockSetpointChanged,
                     onSetPressureTarget = onPressureSetpointChanged,
+                    onTareScale = onTareScale,
                     modifier = Modifier.weight(1f),
                 )
                 ShotCard(
@@ -534,6 +541,44 @@ private fun resolvedBlockTargetC(machine: MachineState): Float =
         machine.groupSetpointC + machine.thermoblockOffsetC
     }
 
+// One drip-tray figure. White throughout so the scale row reads as its own
+// group against the orange/amber temperature and pressure readouts above it.
+@Composable
+private fun WeightReadout(label: String, grams: Float) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White.copy(alpha = 0.7f),
+        )
+        Text(
+            text = if (grams.isNaN()) "— g" else "%.1f g".format(grams),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Medium,
+            color = Color.White,
+        )
+    }
+}
+
+@Composable
+private fun TareButton(onClick: () -> Unit, enabled: Boolean) {
+    Box(
+        modifier = Modifier
+            .size(26.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .border(1.dp, Color.White.copy(alpha = if (enabled) 0.5f else 0.2f), RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "T",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = Color.White.copy(alpha = if (enabled) 1f else 0.3f),
+        )
+    }
+}
+
 @Composable
 private fun TemperaturesCard(
     machine: MachineState,
@@ -542,6 +587,7 @@ private fun TemperaturesCard(
     onSetGroupTarget: (Float) -> Unit,
     onSetThermoblockTarget: (Float) -> Unit,
     onSetPressureTarget: (Float) -> Unit,
+    onTareScale: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Tighter than the default 20 dp box: 5 dp off the top, 7 dp off the
@@ -597,6 +643,22 @@ private fun TemperaturesCard(
                 autoActive = !machine.thermoblockManual,
                 ovrActive = machine.thermoblockManual,
             )
+        }
+        // Drip-tray cells, each under the readout it sits below. The per-cell
+        // figures are here rather than just the total because a bad corner or a
+        // dead cell otherwise just halves the total silently.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            WeightReadout(label = "Left", grams = machine.weightLeftG)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                WeightReadout(label = "Total", grams = machine.weightG)
+                Spacer(Modifier.width(8.dp))
+                TareButton(onClick = onTareScale, enabled = enabled)
+            }
+            WeightReadout(label = "Right", grams = machine.weightRightG)
         }
         // Pulled tighter (was 14 dp) so the card is shorter and the four
         // cards clear the panel without scrolling.
