@@ -39,6 +39,7 @@ constexpr const char* kPrefsNtcBetaKey = "ntc_beta";
 
 esp32esso::control::TemperatureLoop g_tempLoop;
 uint32_t g_lastTelemetryMs = 0;
+uint32_t g_scaleWatchUntilMs = 0;
 bool g_calWasActive = false;
 char g_lineBuf[96];
 size_t g_lineLen = 0;
@@ -156,6 +157,10 @@ void printHelp() {
     Serial.println(F("#   ntc show                  -> print R0/Beta"));
     Serial.println(F("#   ntc set <r0> <beta>       -> apply fitted values live"));
     Serial.println(F("#   ntc save                  -> persist R0/Beta to NVS"));
+    Serial.println(F("#   scale                     -> one reading (raw counts + grams)"));
+    Serial.println(F("#   scale tare                -> zero the tray"));
+    Serial.println(F("#   scale watch [s]           -> stream readings while you load a corner"));
+    Serial.println(F("#   scale gain <l> <r>        -> set counts/gram per cell"));
 }
 
 bool loadNtcCalibration() {
@@ -191,6 +196,31 @@ bool saveNtcCalibration() {
     prefs.putFloat(kPrefsNtcBetaKey, ntc->betaK());
     prefs.end();
     return true;
+}
+
+// One line per sample: raw counts per cell first, since wiring faults (a
+// swapped signal pair reading backwards, a cell carrying no load) show up there
+// long before the grams figure means anything.
+void printScaleReading(uint32_t nowMs) {
+    auto* scale = esp32esso::profile::activeProfile().scale;
+    if (scale == nullptr) {
+        Serial.println(F("# scale: no scale on this build"));
+        return;
+    }
+    int32_t left = 0;
+    int32_t right = 0;
+    if (!scale->readRaw(left, right, /*timeoutMs=*/300)) {
+        Serial.println(F("# scale: no sample (check VCC/GND, DT and SCK wiring)"));
+        return;
+    }
+    const auto& cal = scale->calibration();
+    const float grams = static_cast<float>(left - cal.offsetLeft) / cal.countsPerGramLeft +
+                        static_cast<float>(right - cal.offsetRight) / cal.countsPerGramRight;
+    Serial.printf("# scale t=%lu l=%ld r=%ld g=%.2f\n",
+                  static_cast<unsigned long>(nowMs),
+                  static_cast<long>(left),
+                  static_cast<long>(right),
+                  grams);
 }
 
 void printNtcCalibration() {
@@ -288,6 +318,43 @@ void processLine(char* line, uint32_t nowMs) {
             } else {
                 Serial.println(F("# pump: refused (brewing/flushing or no pump output)"));
             }
+        }
+    } else if (!std::strcmp(tok, "scale")) {
+        const char* sub = std::strtok(nullptr, " \t");
+        auto* scale = esp32esso::profile::activeProfile().scale;
+        if (scale == nullptr) {
+            Serial.println(F("# scale: no scale on this build"));
+        } else if (sub == nullptr) {
+            printScaleReading(nowMs);
+        } else if (!std::strcmp(sub, "tare")) {
+            if (scale->tare()) {
+                const auto& cal = scale->calibration();
+                Serial.printf("# scale: tared l=%ld r=%ld\n",
+                              static_cast<long>(cal.offsetLeft),
+                              static_cast<long>(cal.offsetRight));
+            } else {
+                Serial.println(F("# scale: tare failed (no sample)"));
+            }
+        } else if (!std::strcmp(sub, "watch")) {
+            const char* a = std::strtok(nullptr, " \t");
+            const uint32_t secs = a ? static_cast<uint32_t>(std::atol(a)) : 15;
+            g_scaleWatchUntilMs = nowMs + secs * 1000UL;
+            Serial.printf("# scale: watching for %lus\n", static_cast<unsigned long>(secs));
+        } else if (!std::strcmp(sub, "gain")) {
+            const char* a = std::strtok(nullptr, " \t");
+            const char* b = std::strtok(nullptr, " \t");
+            if (a == nullptr || b == nullptr) {
+                Serial.println(F("# scale gain: expected <left> <right> counts/gram"));
+            } else {
+                auto cal = scale->calibration();
+                cal.countsPerGramLeft = std::atof(a);
+                cal.countsPerGramRight = std::atof(b);
+                scale->setCalibration(cal);
+                Serial.printf("# scale: gain l=%.1f r=%.1f counts/g\n",
+                              cal.countsPerGramLeft, cal.countsPerGramRight);
+            }
+        } else {
+            Serial.printf("# scale: unknown '%s' (tare | watch | gain)\n", sub);
         }
     } else if (!std::strcmp(tok, "cal")) {
         const char* sub = std::strtok(nullptr, " \t");
@@ -423,6 +490,20 @@ void loop() {
     // rung's point is emitted even though stopCalibration() already fired.
     if (g_tempLoop.takeCalSample()) {
         emitCalSettledSample(now);
+    }
+
+    // Non-blocking so the PID keeps running while a corner is being loaded by
+    // hand; the amps free-run at 10 SPS, so an unready sample is just skipped.
+    if (g_scaleWatchUntilMs != 0) {
+        if (static_cast<int32_t>(now - g_scaleWatchUntilMs) >= 0) {
+            g_scaleWatchUntilMs = 0;
+            Serial.println(F("# scale: watch done"));
+        } else {
+            auto* scale = esp32esso::profile::activeProfile().scale;
+            if (scale != nullptr && scale->ready()) {
+                printScaleReading(now);
+            }
+        }
     }
 
     const bool calActive = g_tempLoop.calibrating();

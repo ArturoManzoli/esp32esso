@@ -5,6 +5,7 @@
 #include "hal/ac_phase_dimmer.h"
 #include "hal/discrete_input.h"
 #include "hal/discrete_output.h"
+#include "hal/dual_hx711_scale.h"
 #include "hal/ntc_thermistor_sensor.h"
 #include "hal/pressure_sensor.h"
 #include "hal/temperature_sensor.h"
@@ -93,6 +94,10 @@ struct MachineProfile {
 
     // Tier 2+ - optional
     hal::PressureSensor* pressureSensor;
+
+    // Tier 4 - drip-tray scale (two load cells summed). nullptr until the
+    // hardware is installed and the build enables ESP32ESSO_SCALE_HX711.
+    hal::DualHx711Scale* scale;
 };
 
 // Selected at link time by the build env via the matching profile env-flag.

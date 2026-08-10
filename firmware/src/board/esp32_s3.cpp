@@ -10,7 +10,9 @@ namespace esp32esso::board {
 // Tier 2 (dual-TC) adds a second thermocouple CS (GPIO 11) for the thermoblock
 // amp -- the group amp stays on the Tier 1 CS (GPIO 10) -- plus a pump
 // phase-dimmer (DIM GPIO 6, Z-C GPIO 9), a brew-valve SSR (GPIO 5), and a
-// relief-valve output (GPIO 14).
+// relief-valve output (GPIO 14). Tier 4 adds the drip-tray scale: one shared
+// HX711 clock (GPIO 21) and a data pin per amp (GPIO 15, 16). These stay clear
+// of the octal-PSRAM range (GPIO 33-37) an N16R8 module uses.
 const BoardConfig& activeBoard() {
     static const BoardConfig kBoard = {
         .info =
@@ -32,6 +34,9 @@ const BoardConfig& activeBoard() {
                 .brewValveSsr = 5,  // brew valve alone, plain on/off
                 .solenoidValve = 14,  // second SSR/MOSFET: relief/vent valve
                 .pressureAdc = 8,  // ADC1_CH7: brew-line transducer
+                .scaleSck = 21,        // HX711 clock, shared by both amps
+                .scaleDoutLeft = 15,   // HX711 data, left drip-tray cell
+                .scaleDoutRight = 16,  // HX711 data, right drip-tray cell
             },
     };
     return kBoard;

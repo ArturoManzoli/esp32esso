@@ -82,6 +82,12 @@ hal::AnalogPressureSensor g_pressureSensor(kPins.pressureAdc);
 #endif
 #endif
 
+#if defined(ESP32ESSO_SCALE_HX711)
+// Tier 4: two load cells under the drip-tray lid, one HX711 each, sharing the
+// clock so both are sampled at the same instant.
+hal::DualHx711Scale g_dripTrayScale(kPins.scaleSck, kPins.scaleDoutLeft, kPins.scaleDoutRight);
+#endif
+
 const MachineProfile kOsterXpertProfile = {
     .metadata =
         {
@@ -156,6 +162,11 @@ const MachineProfile kOsterXpertProfile = {
 #else
     .pressureSensor = nullptr,
 #endif
+#if defined(ESP32ESSO_SCALE_HX711)
+    .scale = &g_dripTrayScale,
+#else
+    .scale = nullptr,
+#endif
 };
 
 }  // namespace
@@ -187,6 +198,9 @@ void initActiveProfilePeripherals() {
 #if defined(ESP32ESSO_PRESSURE_ADC)
     g_pressureSensor.begin();
 #endif
+#endif
+#if defined(ESP32ESSO_SCALE_HX711)
+    g_dripTrayScale.begin();
 #endif
 }
 

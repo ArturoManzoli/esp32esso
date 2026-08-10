@@ -89,6 +89,23 @@ Wiring is in [`tier-2-wiring.md`](tier-2-wiring.md) (pump/valve section); the
 measured duty-to-pressure sweep the firmware feeds forward from is in
 [`pump-dimmer-calibration.md`](pump-dimmer-calibration.md).
 
-## Tier 4
+## Tier 4 - Scale
 
-Not started. Documented as that tier comes online for this machine.
+Turns the **drip-tray lid** into a scale platform on **two load cells**, one
+**HX711** amplifier each, summed so the reading holds wherever the cup sits.
+Feeds stop-on-weight and predictive yield. Entirely low voltage: this is the one
+tier that never touches mains.
+
+### BOM (machine-specific additions)
+
+| Qty | Part | Notes |
+| --- | ---- | ----- |
+| 2 | Parallel-beam (single-point) load cell, 3 kg, 4-wire | 1 mV/V, ~1 kΩ bridge. One under each edge of the tray lid |
+| 2 | HX711 24-bit ADC breakout | Common 33 × 20 mm green module. Channel A (gain 128) only; **power from 3V3, not 5V** |
+| ~ | M4/M5 fasteners + spacers | Each cell needs a clearance gap at both ends so the beam can flex |
+
+### Wiring
+
+Documented in [`tier-4-wiring.md`](tier-4-wiring.md), including the shared-clock
+pin map, the load-cell colour-code check, and the mechanical install the
+accuracy actually depends on.

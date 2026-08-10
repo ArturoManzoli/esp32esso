@@ -23,6 +23,13 @@ namespace esp32esso::board {
 // ESP32ESSO_THERMOBLOCK_NTC); the dual-thermocouple setup is preferred (linear,
 // cold-junction-compensated, less drift). Solenoid and pressure-transducer
 // pins land with their tiers.
+//
+// Tier 4 weighs the cup with two load cells under the drip-tray lid, one HX711
+// amp each on the chip's gain-128 channel A. The two amps share `scaleSck` and
+// keep their own `scaleDout*`, so a single clock train shifts both out at once
+// and the pair is sampled at the same instant -- tray vibration and pump ripple
+// then cancel in the sum instead of beating between two free-running converters.
+// Amps must be powered from 3V3, not 5V: their DOUT swings to VCC.
 struct BoardPins {
     uint8_t thermocoupleCs;
     uint8_t thermocoupleSck;
@@ -35,6 +42,9 @@ struct BoardPins {
     uint8_t brewValveSsr;  // Tier 2 brew solenoid valve alone (app start/stop shot, on/off)
     uint8_t solenoidValve;  // Tier 2 relief/3-way valve output (second SSR/MOSFET)
     uint8_t pressureAdc;  // Tier 2 brew-line pressure transducer (ADC1 divider node)
+    uint8_t scaleSck;        // Tier 4 HX711 clock, shared by both amps
+    uint8_t scaleDoutLeft;   // Tier 4 HX711 data, drip-tray load cell (left edge)
+    uint8_t scaleDoutRight;  // Tier 4 HX711 data, drip-tray load cell (right edge)
 };
 
 // Human-readable board identity plus the capability hints the higher tiers
