@@ -209,22 +209,23 @@ characteristic.
 - **Properties:** READ, WRITE
 - **Payload:** variable-length little-endian blob (a pressure/flow profile).
 
-Selects a bundled espresso pressure/flow profile (curated in the app from the
+Selects the pressure/flow profile the firmware executes by duty-cycling the
+pump — either one of the bundled ones (curated in the app from the
 [gaggimate](https://github.com/jniebuhr/gaggimate) and
-[gaggiuino](https://github.com/Zer0-bit/gaggiuino) projects) for the firmware to
-execute by duty-cycling the pump. When a profile is active it replaces the
+[gaggiuino](https://github.com/Zer0-bit/gaggiuino) projects) or one the operator
+drew in the app's profile editor. When a profile is active it replaces the
 built-in pre-infusion + `PumpRamp` behaviour for the whole shot.
 
-Layout — an 8-byte header followed by `phaseCount` × 28-byte phase records:
+Layout — an 8-byte header followed by `phaseCount` phase records:
 
 | Offset | Type       | Field         | Notes                                           |
 | ------ | ---------- | ------------- | ----------------------------------------------- |
-| 0      | `u8`       | `version`     | `1`                                             |
+| 0      | `u8`       | `version`     | `1` (28-byte records) or `2` (36-byte records)   |
 | 1      | `u8`       | `phaseCount`  | number of phase records that follow (max 12)    |
 | 2      | `u8[2]`    | reserved      | `0`                                             |
 | 4      | `float32`  | `temperature` | profile's recommended brew temp °C (advisory)   |
 
-Each phase record (28 bytes):
+Each phase record (28 bytes on v1, 36 on v2):
 
 | Offset | Type      | Field               | Notes                                          |
 | ------ | --------- | ------------------- | ---------------------------------------------- |
@@ -238,15 +239,28 @@ Each phase record (28 bytes):
 | 16     | `float32` | `durationSec`       | total phase length                             |
 | 20     | `float32` | `restriction`       | limit on the other variable (0 = none)         |
 | 24     | `float32` | `stopPressureAbove` | early-exit pressure in bar (0 = time only)     |
+| 28     | `float32` | `blockTempStartC`   | v2 only: thermoblock target at phase start     |
+| 32     | `float32` | `blockTempEndC`     | v2 only: thermoblock target at phase end       |
 
 Phases run in order; a phase ends after `durationSec` or early when
 `stopPressureAbove` is met on the transducer, and the last phase holds until the
 operator ends the shot. Pressure phases close a coarse loop on the transducer
 (feedforward + P trim); flow phases run open-loop (no flow sensor) with
-`restriction` as a soft pressure cap. A payload with `phaseCount == 0`, an
-unknown `version`, or shorter than one phase clears the profile. Persisted to
-NVS (key `brewProf`) so the selection survives a reboot; the app also re-sends it
-on connect.
+`restriction` as a soft pressure cap.
+
+A v2 phase whose block temperatures are both `0` leaves temperature control
+alone. Otherwise the profile owns the thermoblock for the shot: the target ramps
+linearly across the *whole* phase duration (not `transitionSec`, so a
+vertex-to-vertex slope stays continuous) through the same override path as
+`ThermoblockSetpoint`, which also means `thermoblock_manual` reads `1` while it
+runs. Ending the shot — or clearing the profile — hands temperature back to
+`group + offset`. Values are clamped to the machine's brew band exactly as a
+manual block setpoint is.
+
+A payload with `phaseCount == 0`, an unknown `version`, or shorter than one phase
+clears the profile. Persisted to NVS (key `brewProf`) so the selection survives a
+reboot — which is why v1 stays readable, since that stored blob may predate a
+firmware update. The app also re-sends the profile on connect.
 
 ### Characteristic `PressureSetpoint` — `a7b3c210-000d-4000-8000-000000000001`
 

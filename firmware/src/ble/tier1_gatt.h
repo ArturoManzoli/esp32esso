@@ -30,12 +30,18 @@ inline constexpr const char* kThermoblockSetpointUuid = "a7b3c210-000a-4000-8000
 inline constexpr const char* kPumpRampUuid = "a7b3c210-000b-4000-8000-000000000001";
 // Brew pressure/flow profile program (variable-length blob). Little-endian:
 // an 8-byte header { u8 version, u8 phaseCount, u8[2] reserved, f32 temperature }
-// followed by phaseCount x 28-byte phase records
+// followed by phaseCount phase records.
+// v1 records are 28 bytes:
 // { u8 mode(0=pressure,1=flow), u8 curve(0=instant,1=linear,2=ease),
 //   u8 valveOpen, u8 reserved, f32 targetStart, f32 targetEnd, f32 transitionSec,
 //   f32 durationSec, f32 restriction, f32 stopPressureAbove }.
-// A header with phaseCount 0 (or a payload shorter than one phase) clears the
-// profile. See BrewProfile.toWireBytes in the app and protocol/ble/tier2.md.
+// v2 records are 36 bytes: the v1 fields plus
+// { f32 blockTempStartC, f32 blockTempEndC }, a thermoblock temperature ramped
+// across the phase (0 on both = that phase leaves temperature control alone).
+// Both versions are accepted, because a v1 blob can still be sitting in NVS
+// from before an update. A header with phaseCount 0 (or a payload shorter than
+// one phase) clears the profile. See BrewProfile.toWireBytes in the app and
+// protocol/ble/tier2.md.
 inline constexpr const char* kBrewProfileUuid = "a7b3c210-000c-4000-8000-000000000001";
 // Manual brew-pressure hold (4-byte float bar). A positive value pins the shot
 // at that pressure, overriding the selected brew profile; 0 (or NaN) clears the
@@ -52,7 +58,8 @@ inline constexpr const char* kDeviceName = "Esp32esso";
 inline constexpr size_t kMachineStateSize = 72;
 inline constexpr size_t kSettingsSize = 20;
 inline constexpr size_t kBrewProfileHeaderSize = 8;
-inline constexpr size_t kBrewProfilePhaseSize = 28;
+inline constexpr size_t kBrewProfilePhaseSize = 28;    // wire v1
+inline constexpr size_t kBrewProfilePhaseSizeV2 = 36;  // wire v2 (adds block temps)
 inline constexpr size_t kBrewProfileMaxPhases = 12;
 
 // 72-byte MachineState v7. `flow_mls` is still a NaN stub so the brew graph can

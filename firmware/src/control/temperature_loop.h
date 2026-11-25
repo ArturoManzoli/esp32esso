@@ -148,8 +148,12 @@ public:
     // phase, ml/s for a FLOW phase) over its transition then holding it, while
     // the pump is duty-cycled to chase it -- pressure phases close a coarse loop
     // on the transducer, flow phases run open-loop (no flow sensor) with the
-    // phase's pressure limit as a soft cap. `data`/`len` is the BLE blob (see
-    // tier1_gatt.h); an empty / zero-phase blob clears the profile.
+    // phase's pressure limit as a soft cap. A phase may also carry a thermoblock
+    // temperature ramp (wire v2), in which case the profile pins the block for
+    // the duration of the shot exactly as a manual block setpoint would, and
+    // temperature control returns to group + offset when the shot ends.
+    // `data`/`len` is the BLE blob (see tier1_gatt.h); an empty / zero-phase
+    // blob clears the profile.
     void setBrewProfile(const uint8_t* data, size_t len);
     void clearBrewProfile();
     bool brewProfileActive() const { return profileActive_; }
@@ -276,6 +280,7 @@ private:
     void updateFlush(uint32_t nowMs);
     void updatePumpAndBrewValve(uint32_t nowMs);
     void updateProfileExecution(uint32_t nowMs);
+    void releaseProfileTemperature();
     void applyPumpDuty(uint32_t nowMs, float duty);
     float pressureHoldDuty(float targetBar) const;
     void updateReliefValve(uint32_t nowMs);
@@ -357,6 +362,10 @@ private:
         float durationSec = 0.0f;
         float restriction = 0.0f;       // limit on the other variable (0 = none)
         float stopPressureAbove = 0.0f;  // early-exit pressure (0 = time only)
+        // Thermoblock temperature ramped across the phase (wire v2). Both 0
+        // means the phase does not touch temperature control.
+        float blockTempStartC = 0.0f;
+        float blockTempEndC = 0.0f;
     };
     ProfilePhaseRt profilePhases_[kMaxProfilePhases];
     uint8_t profilePhaseCount_ = 0;
@@ -364,6 +373,13 @@ private:
     float profileTempC_ = 0.0f;         // profile's recommended brew temp (informational)
     uint8_t profilePhaseIndex_ = 0;     // phase currently executing during a shot
     uint32_t profilePhaseStartMs_ = 0;  // start of the current phase
+    // True while the running profile is the one commanding the thermoblock
+    // setpoint, so the end of the shot knows to hand temperature control back
+    // to the normal group + offset regime (see releaseProfileTemperature).
+    // profileTempLastC_ is the last value pushed through the override, so a
+    // ramp only re-applies on a real change instead of every 10 ms tick.
+    bool profileTempApplied_ = false;
+    float profileTempLastC_ = NAN;
 
     // Grouphead flush window (see startFlush)
     bool flushing_ = false;

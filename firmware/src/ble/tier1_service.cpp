@@ -465,7 +465,7 @@ void Tier1Service::begin(control::TemperatureLoop* loop,
         loop_->setTargetWeightGrams(loadFloat(kPrefsWeightTargetKey, 0.0f));
         // Restore the selected brew profile (if any) from NVS.
         uint8_t profileBlob[kBrewProfileHeaderSize +
-                            kBrewProfileMaxPhases * kBrewProfilePhaseSize];
+                            kBrewProfileMaxPhases * kBrewProfilePhaseSizeV2];
         const size_t profileLen =
             loadBytes(kPrefsBrewProfileKey, profileBlob, sizeof(profileBlob));
         if (profileLen > 0) {
