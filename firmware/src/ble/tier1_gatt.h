@@ -92,7 +92,7 @@ struct MachineStateWire {
     uint8_t flushing;          // 1 while a grouphead flush pulse is active
     uint8_t thermoblock_manual;  // 1 when an absolute manual setpoint overrides group+offset
     uint8_t pressure_manual;   // 1 when an operator-set pressure hold overrides the profile
-    uint8_t _pad[1];           // keep the trailing float 4-byte aligned
+    uint8_t steaming;          // 1 while steam mode holds the steam setpoint (was padding)
     float pressure_setpoint_bar;  // operator-set hold target; NaN when not held
     float profile_elapsed_sec;    // position on the running profile; NaN when idle
     float weight_left_g;          // drip-tray left cell alone; NaN when no scale

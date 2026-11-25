@@ -121,6 +121,7 @@ const MachineProfile kGaggiaBabyProfile = {
 #endif
     .scale = nullptr,
     .brewSwitch = nullptr,
+    .steamSwitch = nullptr,
 };
 
 }  // namespace

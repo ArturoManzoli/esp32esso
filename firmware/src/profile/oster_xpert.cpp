@@ -95,6 +95,7 @@ hal::Ads1115PressureSensor g_pressureSensor(kPins.i2cSda, kPins.i2cScl);
 #if defined(ESP32ESSO_PANEL_INPUTS)
 // Active low: a button or an opto output pulls the pin to GND.
 hal::GpioDiscreteInput g_brewSwitch(kPins.brewSwitchIn);
+hal::GpioDiscreteInput g_steamSwitch(kPins.steamSwitchIn);
 #endif
 
 #if defined(ESP32ESSO_SCALE_HX711)
@@ -185,8 +186,10 @@ const MachineProfile kOsterXpertProfile = {
 #endif
 #if defined(ESP32ESSO_PANEL_INPUTS)
     .brewSwitch = &g_brewSwitch,
+    .steamSwitch = &g_steamSwitch,
 #else
     .brewSwitch = nullptr,
+    .steamSwitch = nullptr,
 #endif
 };
 
@@ -238,6 +241,7 @@ void initActiveProfilePeripherals() {
 #endif
 #if defined(ESP32ESSO_PANEL_INPUTS)
     g_brewSwitch.begin();
+    g_steamSwitch.begin();
 #endif
 }
 

@@ -55,7 +55,7 @@ or 68 bytes still parses correctly and can treat the later fields as absent.
 | 48 | 1 | `flushing` | `uint8` | `1` while a grouphead flush is in progress (see `Flush`) |
 | 49 | 1 | `thermoblock_manual` | `uint8` | `1` when an absolute manual thermoblock setpoint overrides `group + offset` (see `ThermoblockSetpoint`) |
 | 50 | 1 | `pressure_manual` | `uint8` | `1` when an operator-set pressure hold overrides the selected profile (see `PressureSetpoint`) |
-| 51 | 1 | `_pad` | `uint8[1]` | Reserved; keeps the trailing float aligned |
+| 51 | 1 | `steaming` | `uint8` | `1` while steam mode holds the steam setpoint (panel steam input); was padding, so older firmware reports `0` |
 | 52 | 4 | `pressure_setpoint_bar` | `float32` | The held pressure while `pressure_manual` is `1`; `NaN` otherwise |
 | 56 | 4 | `profile_elapsed_sec` | `float32` | Position along the running brew profile's own timeline; `NaN` when no profile is driving the pump |
 | 60 | 4 | `weight_left_g` | `float32` | Drip-tray left load cell alone; `NaN` when no scale is bound |

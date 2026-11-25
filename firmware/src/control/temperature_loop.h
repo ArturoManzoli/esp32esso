@@ -96,6 +96,13 @@ public:
     void setSteamSetpointCelsius(float c);
     float steamSetpointCelsius() const { return steamSetpoint_; }
 
+    // Steam mode, driven by the profile's panel steam input: while it is on the
+    // heater holds the boiler/block at the steam setpoint (group control is
+    // suspended and shots are refused), and when it is switched off, or after
+    // kSteamMaxMs, temperature returns to the brew target. A timed-out session
+    // stays off until the input is cycled.
+    bool steaming() const { return steaming_; }
+
     // Shot timer: brewing is true while a shot is active. brewSource: 0 idle,
     // 1 manual (app), 2 panel brew input (see updateBrewSwitch).
     //
@@ -276,6 +283,7 @@ private:
     void runCalibrationStep(uint32_t nowMs);
     void updateSlowPwm(uint32_t nowMs);
     void updateBrewSwitch(uint32_t nowMs);
+    void updateSteamSwitch(uint32_t nowMs);
     void updateBrewState(uint32_t nowMs);
     void updatePreinfusion(uint32_t nowMs);
     void updateFlush(uint32_t nowMs);
@@ -344,6 +352,11 @@ private:
     bool brewSwitchOn_ = false;
     uint32_t brewSwitchSinceMs_ = 0;
     bool panelShot_ = false;  // the running shot was started from the panel
+
+    // Steam mode (see steaming())
+    bool steamSwitchOn_ = false;
+    bool steaming_ = false;
+    uint32_t steamSinceMs_ = 0;
 
     // Pre-infusion (see setPreinfusionSeconds)
     float preinfusionSec_ = 2.0f;
