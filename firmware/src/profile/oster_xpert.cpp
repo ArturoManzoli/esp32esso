@@ -1,5 +1,7 @@
 #if defined(ESP32ESSO_PROFILE_OSTER_XPERT)
 
+#include <Arduino.h>
+
 #include "board/board_config.h"
 #include "hal/gpio_discrete_output.h"
 #if defined(ESP32ESSO_PRESSURE_ADC)
@@ -180,6 +182,19 @@ hal::NtcThermistorSensor* thermoblockNtcSensor() {
     return &g_brewTempSensor;
 #else
     return nullptr;
+#endif
+}
+
+void silenceMainsOutputs() {
+    // begin() drives each output to its off level as declared by its polarity,
+    // so a board swap only touches the declarations above. The dimmer gate has
+    // no idle state of its own -- it only fires on a pulse -- so it just goes low.
+    g_heaterRelay.begin();
+#if defined(ESP32ESSO_TIER2)
+    pinMode(kPins.pumpSsr, OUTPUT);
+    digitalWrite(kPins.pumpSsr, LOW);
+    g_brewValveRelay.begin();
+    g_solenoidValve.begin();
 #endif
 }
 

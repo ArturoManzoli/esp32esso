@@ -53,6 +53,10 @@ const MachineProfile& activeProfile() {
     return kStubProfile;
 }
 
+void silenceMainsOutputs() {
+    // Stub profile switches no mains; intentionally empty.
+}
+
 void initActiveProfilePeripherals() {
     // Stub profile has no peripherals; intentionally empty.
 }
