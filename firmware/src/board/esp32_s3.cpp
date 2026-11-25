@@ -37,6 +37,8 @@ const BoardConfig& activeBoard() {
                 .scaleSck = 21,        // HX711 clock, shared by both amps
                 .scaleDoutLeft = 15,   // HX711 data, left drip-tray cell
                 .scaleDoutRight = 16,  // HX711 data, right drip-tray cell
+                .i2cSda = 1,  // ADS1115 option
+                .i2cScl = 2,
             },
     };
     return kBoard;

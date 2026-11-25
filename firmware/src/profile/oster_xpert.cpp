@@ -6,6 +6,8 @@
 #include "hal/gpio_discrete_output.h"
 #if defined(ESP32ESSO_PRESSURE_ADC)
 #include "hal/analog_pressure_sensor.h"
+#elif defined(ESP32ESSO_PRESSURE_ADS1115)
+#include "hal/ads1115_pressure_sensor.h"
 #endif
 #if defined(ESP32ESSO_THERMOCOUPLE_MAX6675)
 #include "hal/max6675_sensor.h"
@@ -81,6 +83,9 @@ hal::GpioDiscreteOutput g_solenoidValve(kPins.solenoidValve, /*activeHigh=*/fals
 // hardware/oster-xpert/tier-2-wiring.md). Defaults match the documented front
 // end; refine the calibration once a reference gauge is available.
 hal::AnalogPressureSensor g_pressureSensor(kPins.pressureAdc);
+#elif defined(ESP32ESSO_PRESSURE_ADS1115)
+// Same transducer and divider, digitised by an ADS1115 on AIN0 instead.
+hal::Ads1115PressureSensor g_pressureSensor(kPins.i2cSda, kPins.i2cScl);
 #endif
 #endif
 
@@ -159,7 +164,8 @@ const MachineProfile kOsterXpertProfile = {
     .pumpDimmer = nullptr,
     .brewValveRelay = nullptr,
 #endif
-#if defined(ESP32ESSO_TIER2) && defined(ESP32ESSO_PRESSURE_ADC)
+#if defined(ESP32ESSO_TIER2) && \
+    (defined(ESP32ESSO_PRESSURE_ADC) || defined(ESP32ESSO_PRESSURE_ADS1115))
     .pressureSensor = &g_pressureSensor,
 #else
     .pressureSensor = nullptr,
@@ -210,7 +216,7 @@ void initActiveProfilePeripherals() {
     g_pumpDimmer.begin();
     g_brewValveRelay.begin();
     g_solenoidValve.begin();
-#if defined(ESP32ESSO_PRESSURE_ADC)
+#if defined(ESP32ESSO_PRESSURE_ADC) || defined(ESP32ESSO_PRESSURE_ADS1115)
     g_pressureSensor.begin();
 #endif
 #endif

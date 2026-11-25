@@ -11,6 +11,29 @@ namespace {
 constexpr int kBurst = 15;  // odd count so the median is a single sample
 }  // namespace
 
+float pressureBarFromPinMillivolts(const PressureCalibration& cal, float pinMv, bool& ok) {
+    // Undo the divider to recover the transducer output voltage.
+    if (cal.dividerRatio <= 0.0f) {
+        ok = false;
+        return NAN;
+    }
+    const float sensorMv = pinMv / cal.dividerRatio;
+
+    const float span = cal.vMaxMillivolts - cal.vMinMillivolts;
+    if (!(span > 0.0f)) {
+        ok = false;
+        return NAN;
+    }
+    const float bar = (sensorMv - cal.vMinMillivolts) / span * cal.fullScaleBar;
+
+    if (std::isnan(bar) || bar < cal.zeroClampBar) {
+        ok = false;
+        return NAN;  // below zero => transducer unpowered / unplugged
+    }
+    ok = true;
+    return bar < 0.0f ? 0.0f : bar;
+}
+
 AnalogPressureSensor::AnalogPressureSensor(uint8_t adcPin, const PressureCalibration& cal)
     : adcPin_(adcPin), cal_(cal) {}
 
@@ -31,27 +54,7 @@ float AnalogPressureSensor::readBar() {
     std::sort(samples, samples + kBurst);
     const float pinMv = samples[kBurst / 2];
     lastMillivolts_ = pinMv;
-
-    // Undo the divider to recover the transducer output voltage.
-    if (cal_.dividerRatio <= 0.0f) {
-        ok_ = false;
-        return NAN;
-    }
-    const float sensorMv = pinMv / cal_.dividerRatio;
-
-    const float span = cal_.vMaxMillivolts - cal_.vMinMillivolts;
-    if (!(span > 0.0f)) {
-        ok_ = false;
-        return NAN;
-    }
-    const float bar = (sensorMv - cal_.vMinMillivolts) / span * cal_.fullScaleBar;
-
-    if (std::isnan(bar) || bar < cal_.zeroClampBar) {
-        ok_ = false;
-        return NAN;  // below zero => transducer unpowered / unplugged
-    }
-    ok_ = true;
-    return bar < 0.0f ? 0.0f : bar;
+    return pressureBarFromPinMillivolts(cal_, pinMv, ok_);
 }
 
 bool AnalogPressureSensor::ok() const {
