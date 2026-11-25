@@ -188,6 +188,13 @@ public:
     // Zeroes the tray. Returns false when there is no scale or no sample.
     bool tareScale();
 
+    // Stop-on-weight. A positive target ends the shot as soon as the tray total
+    // reaches it; 0 (or NaN) disables it. The comparison is against the absolute
+    // total, the same figure the app displays, so the tray is expected to be
+    // tared with the empty cup already on it.
+    void setTargetWeightGrams(float grams);
+    float targetWeightGrams() const { return targetWeightG_; }
+
     // Manual brew-pressure hold. When set, a shot chases this pressure for its
     // whole duration instead of running the selected brew profile (the same
     // relationship the manual thermoblock setpoint has with group + offset), so
@@ -274,6 +281,7 @@ private:
     void updateReliefValve(uint32_t nowMs);
     void updatePressure();
     void updateScale();
+    void trackScaleZero(float meanLeftG, float meanRightG);
     void updateHeaterTimeout(uint32_t nowMs);
     float computeThermoblockSetpoint() const;
     void latchFault(const char* reason);
@@ -373,6 +381,17 @@ private:
     // Drip-tray scale, per cell (see weightLeftGrams())
     float weightLeftG_ = NAN;
     float weightRightG_ = NAN;
+    float targetWeightG_ = 0.0f;  // 0 = stop-on-weight disabled
+
+    // Rolling mean over the last samples of each cell, and the software zero the
+    // drift tracker walks (see trackScaleZero). Both are reset by a tare.
+    static constexpr uint8_t kWeightFilterSamples = 8;
+    float weightSamplesLeftG_[kWeightFilterSamples] = {};
+    float weightSamplesRightG_[kWeightFilterSamples] = {};
+    uint8_t weightSampleIndex_ = 0;
+    uint8_t weightSampleCount_ = 0;
+    float zeroLeftG_ = 0.0f;
+    float zeroRightG_ = 0.0f;
 
     // Manual brew-pressure hold (see setManualPressureBar)
     bool manualPressureActive_ = false;

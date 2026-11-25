@@ -44,22 +44,25 @@ inline constexpr const char* kPressureSetpointUuid = "a7b3c210-000d-4000-8000-00
 // Drip-tray scale tare (1-byte trigger). Any non-zero value zeroes the tray at
 // its current load; the reading is reported back in MachineState.
 inline constexpr const char* kScaleTareUuid = "a7b3c210-000e-4000-8000-000000000001";
+// Stop-on-weight target (4-byte float grams). A positive value ends the shot
+// once the drip-tray total reaches it; 0 (or NaN) disables the stop.
+inline constexpr const char* kWeightTargetUuid = "a7b3c210-000f-4000-8000-000000000001";
 inline constexpr const char* kDeviceName = "Esp32esso";
 
-inline constexpr size_t kMachineStateSize = 68;
+inline constexpr size_t kMachineStateSize = 72;
 inline constexpr size_t kSettingsSize = 20;
 inline constexpr size_t kBrewProfileHeaderSize = 8;
 inline constexpr size_t kBrewProfilePhaseSize = 28;
 inline constexpr size_t kBrewProfileMaxPhases = 12;
 
-// 68-byte MachineState v6. `flow_mls` is still a NaN stub so the brew graph can
+// 72-byte MachineState v7. `flow_mls` is still a NaN stub so the brew graph can
 // allocate the lane before the hardware lands; `weight_g` now carries the real
 // drip-tray total once a scale is bound. `thermoblock_offset_c` reports the
 // current thermoblock setpoint offset (was "gain" in v2); `flushing` reports
 // whether a grouphead-flush pulse is live. Each version appends its fields after
 // the previous ones -- v4 the manual pressure hold, v5 `profile_elapsed_sec`,
-// v6 the per-cell weights -- so an older reader that consumes only the first 52,
-// 56 or 60 bytes still parses correctly.
+// v6 the per-cell weights, v7 the stop-on-weight target -- so an older reader
+// that consumes only the first 52, 56, 60 or 68 bytes still parses correctly.
 struct MachineStateWire {
     float thermoblock_temp_c;
     float group_temp_c;
@@ -87,6 +90,7 @@ struct MachineStateWire {
     float profile_elapsed_sec;    // position on the running profile; NaN when idle
     float weight_left_g;          // drip-tray left cell alone; NaN when no scale
     float weight_right_g;         // drip-tray right cell alone; NaN when no scale
+    float weight_target_g;        // stop-on-weight target; 0 when disabled
 };
 
 static_assert(sizeof(MachineStateWire) == kMachineStateSize);

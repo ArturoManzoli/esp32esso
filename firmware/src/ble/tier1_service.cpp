@@ -54,6 +54,7 @@ constexpr const char* kPrefsPumpRampKey = "pumpRamp";
 constexpr const char* kPrefsThermoblockManualKey = "tbManual";
 constexpr const char* kPrefsPressureManualKey = "pManual";
 constexpr const char* kPrefsBrewProfileKey = "brewProf";
+constexpr const char* kPrefsWeightTargetKey = "wTarget";
 
 Tier1Service g_service;
 BLECharacteristic* g_stateChar = nullptr;
@@ -100,6 +101,7 @@ MachineStateWire packState(uint32_t nowMs) {
         state.weight_left_g = g_loop->weightLeftGrams();
         state.weight_right_g = g_loop->weightRightGrams();
         state.weight_g = g_loop->weightTotalGrams();
+        state.weight_target_g = g_loop->targetWeightGrams();
     }
     state.uptime_ms = nowMs;
     return state;
@@ -258,6 +260,27 @@ public:
         } else {
             g_loop->stopFlush();
         }
+    }
+};
+
+// Positive grams arm the stop; 0 or NaN disable it. Echoed back and persisted
+// so the target survives a reconnect the way the pressure hold does.
+class WeightTargetCallbacks : public BLECharacteristicCallbacks {
+public:
+    void onWrite(BLECharacteristic* characteristic) override {
+        float requested = 0.0f;
+        if (g_loop == nullptr || characteristic == nullptr) {
+            return;
+        }
+        const std::string& value = characteristic->getValue();
+        if (value.size() < sizeof(float)) {
+            return;
+        }
+        std::memcpy(&requested, value.data(), sizeof(float));
+        g_loop->setTargetWeightGrams(requested);
+        const float accepted = g_loop->targetWeightGrams();
+        persistFloat(kPrefsWeightTargetKey, accepted);
+        writeBackFloat(characteristic, accepted);
     }
 };
 
@@ -439,6 +462,7 @@ void Tier1Service::begin(control::TemperatureLoop* loop,
         loop_->setPumpRampSeconds(
             loadFloat(kPrefsPumpRampKey, loop_->pumpRampSeconds()));
         loop_->setManualPressureBar(loadFloat(kPrefsPressureManualKey, 0.0f));
+        loop_->setTargetWeightGrams(loadFloat(kPrefsWeightTargetKey, 0.0f));
         // Restore the selected brew profile (if any) from NVS.
         uint8_t profileBlob[kBrewProfileHeaderSize +
                             kBrewProfileMaxPhases * kBrewProfilePhaseSize];
@@ -529,6 +553,11 @@ void Tier1Service::begin(control::TemperatureLoop* loop,
         kScaleTareUuid, BLECharacteristic::PROPERTY_WRITE);
     scaleTareChar->setCallbacks(new ScaleTareCallbacks());
 
+    BLECharacteristic* weightTargetChar = service->createCharacteristic(
+        kWeightTargetUuid,
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+    weightTargetChar->setCallbacks(new WeightTargetCallbacks());
+
     if (loop_ != nullptr) {
         writeBackFloat(setpointChar, loop_->setpointCelsius());
         writeBackFloat(thermoblockOffsetChar, loop_->thermoblockOffsetC());
@@ -541,6 +570,7 @@ void Tier1Service::begin(control::TemperatureLoop* loop,
         writeBackFloat(pressureSetpointChar,
                        loop_->pressureManualActive() ? loop_->manualPressureBar()
                                                      : 0.0f);
+        writeBackFloat(weightTargetChar, loop_->targetWeightGrams());
         SettingsWire s{loop_->pidKp(), loop_->pidKi(), loop_->pidKd(),
                        loop_->steamSetpointCelsius(), loop_->heaterTimeoutMinutes()};
         uint8_t bytes[sizeof(SettingsWire)];
