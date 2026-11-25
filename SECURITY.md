@@ -13,13 +13,9 @@ supported. Tagged releases are best-effort.
 ## Reporting a vulnerability or a safety issue
 
 Please **do not** open a public GitHub issue for either of the categories
-below. Open a private report instead:
-
-1. Preferred: open a [GitHub Security Advisory](
-   https://github.com/ArturoManzoli/esp32esso/security/advisories/new) on this
-   repository.
-2. Fallback: contact the maintainer privately via a direct message on
-   GitHub (`@ArturoManzoli`).
+below. Open a private [GitHub Security Advisory](
+https://github.com/ArturoManzoli/esp32esso/security/advisories/new) on this
+repository instead (the "Report a vulnerability" button on the Security tab).
 
 Reports should include:
 
