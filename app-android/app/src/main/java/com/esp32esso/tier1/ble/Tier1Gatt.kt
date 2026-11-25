@@ -32,14 +32,18 @@ object Tier1Gatt {
     val pressureSetpointUuid: UUID = UUID.fromString("a7b3c210-000d-4000-8000-000000000001")
     // Drip-tray scale tare; any non-zero byte zeroes the tray at its current load.
     val scaleTareUuid: UUID = UUID.fromString("a7b3c210-000e-4000-8000-000000000001")
+    // Stop-on-weight target in grams; 0 disables the stop.
+    val weightTargetUuid: UUID = UUID.fromString("a7b3c210-000f-4000-8000-000000000001")
     // v3 payload size, still the minimum a notification must carry. v4 appends
     // the manual pressure hold, v5 the running profile's position and v6 the
-    // per-cell drip-tray weights; parsing stays tolerant of any of the four
-    // lengths so a newer app keeps working against firmware that predates a field.
+    // per-cell drip-tray weights and v7 the stop-on-weight target; parsing stays
+    // tolerant of every length so a newer app keeps working against firmware
+    // that predates a field.
     const val machineStateSize = 52
     const val machineStateSizeV4 = 56
     const val machineStateSizeV5 = 60
     const val machineStateSizeV6 = 68
+    const val machineStateSizeV7 = 72
     const val settingsSize = 20
 }
 
@@ -75,6 +79,8 @@ data class MachineState(
     // visible instead of silently halving the total. NaN when no scale is bound.
     val weightLeftG: Float = Float.NaN,
     val weightRightG: Float = Float.NaN,
+    // Grams at which the firmware ends the shot by itself; 0 when disabled.
+    val weightTargetG: Float = 0f,
 ) {
     val faultLabel: String?
         get() = when (faultCode) {
@@ -117,6 +123,7 @@ data class MachineState(
             val hasV6 = bytes.size >= Tier1Gatt.machineStateSizeV6
             val weightLeft = if (hasV6) b.float else Float.NaN
             val weightRight = if (hasV6) b.float else Float.NaN
+            val weightTarget = if (bytes.size >= Tier1Gatt.machineStateSizeV7) b.float else 0f
             return MachineState(
                 thermoblockTempC = thermoblock,
                 groupTempC = group,
@@ -147,6 +154,7 @@ data class MachineState(
                 profileElapsedSec = profileElapsed,
                 weightLeftG = weightLeft,
                 weightRightG = weightRight,
+                weightTargetG = weightTarget,
             )
         }
     }

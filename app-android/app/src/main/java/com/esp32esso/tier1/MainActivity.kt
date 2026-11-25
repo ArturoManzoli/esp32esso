@@ -25,11 +25,12 @@ import com.esp32esso.tier1.data.ShotSamples
 import com.esp32esso.tier1.ui.Esp32essoTheme
 import com.esp32esso.tier1.ui.LibraryScreen
 import com.esp32esso.tier1.ui.MainScreen
+import com.esp32esso.tier1.ui.ProfilesScreen
 import com.esp32esso.tier1.ui.RankingScreen
 import com.esp32esso.tier1.ui.SettingsScreen
 import com.esp32esso.tier1.ui.ShotReportScreen
 
-private enum class Screen { Main, Settings, Library, Ranking, ShotReport }
+private enum class Screen { Main, Settings, Library, Profiles, Ranking, ShotReport }
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -64,7 +65,9 @@ class MainActivity : ComponentActivity() {
                 val lastReportShotId by viewModel.lastReportShotId.collectAsState()
                 val demoMode by viewModel.demoMode.collectAsState()
                 val selectedProfileId by viewModel.selectedProfileId.collectAsState()
-                val selectedProfile = BrewProfileLibrary.byId(selectedProfileId)
+                val selectedProfile by viewModel.selectedProfile.collectAsState()
+                val selectableProfiles by viewModel.selectableProfiles.collectAsState()
+                val userProfiles by viewModel.userProfiles.collectAsState()
                 val beans by viewModel.beans.collectAsState()
                 val grinders by viewModel.grinders.collectAsState()
                 val waters by viewModel.waters.collectAsState()
@@ -101,6 +104,20 @@ class MainActivity : ComponentActivity() {
                         onDeleteWater = viewModel::deleteWater,
                         onAddRecipe = viewModel::upsertRecipe,
                         onDeleteRecipe = viewModel::deleteRecipe,
+                        onBack = { screen = Screen.Main },
+                    )
+                    Screen.Profiles -> ProfilesScreen(
+                        profiles = userProfiles,
+                        selectedId = selectedProfileId,
+                        onSave = viewModel::upsertUserProfile,
+                        onDelete = viewModel::deleteUserProfile,
+                        // Picking a profile is the last step before pulling a shot,
+                        // so it hands the operator back to the dashboard with Run
+                        // already pointing at it.
+                        onSelect = {
+                            viewModel.applyBrewProfile(it.toBrewProfile())
+                            screen = Screen.Main
+                        },
                         onBack = { screen = Screen.Main },
                     )
                     Screen.Ranking -> RankingScreen(
@@ -184,20 +201,22 @@ class MainActivity : ComponentActivity() {
                         onThermoblockSetpointChanged = viewModel::applyThermoblockSetpoint,
                         onPressureSetpointChanged = viewModel::applyPressureSetpoint,
                         onTareScale = viewModel::tareScale,
+                        onWeightTargetChanged = viewModel::applyWeightTarget,
                         onBrewToggle = viewModel::setBrewing,
                         onProfileBrewToggle = viewModel::setProfileBrewing,
                         onHeaterToggle = viewModel::setHeaterEnabled,
                         onPreinfusionChanged = viewModel::applyPreinfusion,
-                        onPumpRampChanged = viewModel::applyPumpRamp,
                         onFlush = viewModel::triggerFlush,
                         onOpenSettings = { screen = Screen.Settings },
                         onOpenLibrary = { screen = Screen.Library },
+                        onOpenProfiles = { screen = Screen.Profiles },
                         onOpenRanking = { screen = Screen.Ranking },
                         onSecretDemoToggle = viewModel::toggleDemoMode,
                         onSecretShowReport = viewModel::injectDemoReport,
                         demoMode = demoMode,
                         displayShotTimeMs = displayShotTimeMs,
                         selectedProfile = selectedProfile,
+                        profiles = selectableProfiles,
                         onProfileSelected = viewModel::applyBrewProfile,
                     )
                 }
@@ -281,6 +300,7 @@ private fun shotToReport(shot: ShotEntity): ShotReport {
         peakGroupC = shot.peakGroupC,
         thermoblockOffsetC = shot.thermoblockOffsetC ?: Float.NaN,
         thermoblockManual = shot.thermoblockManual,
+        profileName = shot.profileName,
         samples = samples,
         shotStartUptimeMs = startUptime,
         shotEndUptimeMs = endUptime,

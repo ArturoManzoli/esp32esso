@@ -56,6 +56,7 @@ enum class RankAxis(val label: String) {
     Overall("Overall"),
     Acidity("Acidity"),
     Bitterness("Bitterness"),
+    Sweetness("Sweetness"),
     Body("Body"),
 }
 
@@ -237,6 +238,7 @@ private fun ShotRankCard(
 
     val bits = buildList {
         add("%d s".format((shot.durationMs / 1000L).toInt()))
+        if (shot.profileName.isNotBlank()) add("profile ${shot.profileName}")
         if (!shot.avgBar.isNaN()) add("avg %.1f bar".format(shot.avgBar))
         add("target %d°C".format(shot.targetC.toInt()))
         shot.avgGroupC?.let { add("avg group %.1f°C".format(it)) }
@@ -317,6 +319,7 @@ private fun ShotRankCard(
             ) {
                 StarRow("Bitterness", shot.bitterness)
                 StarRow("Acidity", shot.acidity)
+                StarRow("Sweetness", shot.sweetness)
                 StarRow("Body", shot.body)
                 StarRow("Visuals", shot.visuals)
                 StarRow("Overall", shot.overall)
@@ -333,6 +336,7 @@ private fun scoreFor(shot: ShotEntity, axis: RankAxis): Int =
         RankAxis.Overall -> shot.overall
         RankAxis.Acidity -> shot.acidity
         RankAxis.Bitterness -> shot.bitterness
+        RankAxis.Sweetness -> shot.sweetness
         RankAxis.Body -> shot.body
     }
 

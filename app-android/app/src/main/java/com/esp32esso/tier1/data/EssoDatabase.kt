@@ -14,8 +14,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WaterEntity::class,
         RecipeEntity::class,
         ShotEntity::class,
+        ProfileEntity::class,
     ],
-    version = 8,
+    version = 10,
     exportSchema = false,
 )
 abstract class EssoDatabase : RoomDatabase() {
@@ -73,6 +74,31 @@ abstract class EssoDatabase : RoomDatabase() {
             }
         }
 
+        // v8 -> v9: new `brew_profiles` table for operator-drawn profiles.
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS brew_profiles (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        name TEXT NOT NULL,
+                        notes TEXT NOT NULL DEFAULT '',
+                        verticesJson TEXT NOT NULL DEFAULT '[]',
+                        savedAtEpochMs INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        // v9 -> v10: the brew profile a shot ran under, plus the sweetness grade.
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE shots ADD COLUMN profileName TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE shots ADD COLUMN sweetness INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         // v2 -> v3: new `shots` table for graded shot log + samples JSON blob.
         private val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -121,6 +147,8 @@ abstract class EssoDatabase : RoomDatabase() {
                     MIGRATION_5_6,
                     MIGRATION_6_7,
                     MIGRATION_7_8,
+                    MIGRATION_8_9,
+                    MIGRATION_9_10,
                 )
                     .build()
                     .also { instance = it }

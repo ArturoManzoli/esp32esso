@@ -115,6 +115,7 @@ fun ShotReportScreen(
     var notes by remember(initialShot?.id) { mutableStateOf(initialShot?.notes.orEmpty()) }
     var bitterness by remember(initialShot?.id) { mutableStateOf(initialShot?.bitterness ?: 0) }
     var acidity by remember(initialShot?.id) { mutableStateOf(initialShot?.acidity ?: 0) }
+    var sweetness by remember(initialShot?.id) { mutableStateOf(initialShot?.sweetness ?: 0) }
     var body by remember(initialShot?.id) { mutableStateOf(initialShot?.body ?: 0) }
     var visuals by remember(initialShot?.id) { mutableStateOf(initialShot?.visuals ?: 0) }
     var overall by remember(initialShot?.id) { mutableStateOf(initialShot?.overall ?: 0) }
@@ -196,6 +197,7 @@ fun ShotReportScreen(
                         notes = notes,
                         bitterness = bitterness,
                         acidity = acidity,
+                        sweetness = sweetness,
                         body = body,
                         visuals = visuals,
                         overall = overall,
@@ -301,6 +303,7 @@ fun ShotReportScreen(
                         }
                         Spacer(Modifier.height(10.dp))
                         SummaryRow("Duration", formatDuration(report.durationMs))
+                        SummaryRow("Profile", report.profileName.ifBlank { "None" })
                         SummaryRow("Target", formatTempC(report.targetC))
                         SummaryRow("Pre-infusion", formatSeconds(report.preinfusionSec))
                         SummaryRow("Average pressure", formatBar(report.avgBar))
@@ -352,6 +355,7 @@ fun ShotReportScreen(
                                 when (axis) {
                                     "Bitterness" -> bitterness = it
                                     "Acidity" -> acidity = it
+                                    "Sweetness" -> sweetness = it
                                     "Body" -> body = it
                                     "Visuals" -> visuals = it
                                     "Overall" -> overall = it
@@ -361,6 +365,7 @@ fun ShotReportScreen(
                         }
                         StarRow("Bitterness", bitterness, onChange = setter("Bitterness"))
                         StarRow("Acidity", acidity, onChange = setter("Acidity"))
+                        StarRow("Sweetness", sweetness, onChange = setter("Sweetness"))
                         StarRow("Body", body, onChange = setter("Body"))
                         StarRow("Visuals", visuals, onChange = setter("Visuals"))
                         StarRow("Overall", overall, onChange = setter("Overall"))
@@ -644,6 +649,7 @@ private fun buildEntity(
     notes: String,
     bitterness: Int,
     acidity: Int,
+    sweetness: Int,
     body: Int,
     visuals: Int,
     overall: Int,
@@ -660,6 +666,7 @@ private fun buildEntity(
     finalGroupC = report.finalGroupC,
     thermoblockOffsetC = report.thermoblockOffsetC.takeUnless { it.isNaN() },
     thermoblockManual = report.thermoblockManual,
+    profileName = report.profileName,
     name = name,
     beanId = beanId,
     grinderId = grinderId,
@@ -670,6 +677,7 @@ private fun buildEntity(
     notes = notes,
     bitterness = bitterness,
     acidity = acidity,
+    sweetness = sweetness,
     body = body,
     visuals = visuals,
     overall = overall,

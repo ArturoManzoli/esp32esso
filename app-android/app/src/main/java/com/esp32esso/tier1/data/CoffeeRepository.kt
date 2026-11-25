@@ -14,6 +14,7 @@ class CoffeeRepository(context: Context) {
     val waters: Flow<List<WaterEntity>> get() = dao.waters()
     val recipes: Flow<List<RecipeEntity>> get() = dao.recipes()
     val shots: Flow<List<ShotEntity>> get() = dao.shots()
+    val brewProfiles: Flow<List<ProfileEntity>> get() = dao.brewProfiles()
 
     suspend fun upsert(bean: BeanEntity): Long = dao.upsertBean(bean)
     suspend fun delete(bean: BeanEntity) = dao.deleteBean(bean)
@@ -29,4 +30,7 @@ class CoffeeRepository(context: Context) {
 
     suspend fun upsert(shot: ShotEntity): Long = dao.upsertShot(shot)
     suspend fun delete(shot: ShotEntity) = dao.deleteShot(shot)
+
+    suspend fun upsert(profile: ProfileEntity): Long = dao.upsertBrewProfile(profile)
+    suspend fun delete(profile: ProfileEntity) = dao.deleteBrewProfile(profile)
 }
