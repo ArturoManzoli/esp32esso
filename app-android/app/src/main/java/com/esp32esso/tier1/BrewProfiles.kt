@@ -33,6 +33,8 @@ enum class ProfileSource(val label: String) {
     GAGGIMATE("gaggimate"),
     GAGGIUINO("gaggiuino"),
     DECENT("decent"),
+    // Drawn by the operator in the profile editor (see UserProfiles.kt).
+    CUSTOM("custom"),
 }
 
 // The variable a phase drives the pump toward. The other variable (pressure for
@@ -49,6 +51,10 @@ enum class PhaseCurve(val wire: Int) { INSTANT(0), LINEAR(1), EASE(2) }
 // a flow ceiling for a PRESSURE phase, a pressure ceiling for a FLOW phase.
 // `stopPressureAbove` advances to the next phase early once the transducer
 // reads at/above that pressure (0 = time only).
+// `blockTempStartC`/`blockTempEndC` ramp the thermoblock across the phase while
+// it runs (0 = the phase leaves temperature control alone). Only the editable
+// profiles built in UserProfiles.kt use them; the transcribed library carries
+// one advisory `temperatureC` per profile instead.
 data class ProfilePhase(
     val name: String,
     val mode: PhaseMode,
@@ -60,6 +66,8 @@ data class ProfilePhase(
     val valveOpen: Boolean = true,
     val restriction: Float = 0f,
     val stopPressureAbove: Float = 0f,
+    val blockTempStartC: Float = 0f,
+    val blockTempEndC: Float = 0f,
 )
 
 data class BrewProfile(
@@ -78,7 +86,7 @@ data class BrewProfile(
     // Serialise to the BLE BrewProfile blob (see protocol/ble/tier2.md and
     // firmware/src/ble/tier1_gatt.h). Little-endian: an 8-byte header
     // (version, phaseCount, 2 reserved, f32 temperature) followed by one
-    // 28-byte record per phase. Phases beyond WIRE_MAX_PHASES are dropped.
+    // 36-byte v2 record per phase. Phases beyond WIRE_MAX_PHASES are dropped.
     fun toWireBytes(): ByteArray {
         val used = phases.take(WIRE_MAX_PHASES)
         val buf = ByteBuffer
@@ -100,14 +108,18 @@ data class BrewProfile(
             buf.putFloat(p.durationSec)
             buf.putFloat(p.restriction)
             buf.putFloat(p.stopPressureAbove)
+            buf.putFloat(p.blockTempStartC)
+            buf.putFloat(p.blockTempEndC)
         }
         return buf.array()
     }
 
     companion object {
-        const val WIRE_VERSION = 1
+        // v2 = per-phase thermoblock temperature ramp appended to each record.
+        // The firmware still reads v1 blobs (its NVS copy may predate an update).
+        const val WIRE_VERSION = 2
         const val WIRE_HEADER_SIZE = 8
-        const val WIRE_PHASE_SIZE = 28
+        const val WIRE_PHASE_SIZE = 36
         const val WIRE_MAX_PHASES = 12
 
         // "None" selection: an 8-byte header with phaseCount = 0 clears any

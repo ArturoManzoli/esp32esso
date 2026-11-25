@@ -77,6 +77,11 @@ class Tier1BleClient(context: Context) {
     private var brewProfileCharacteristic: BluetoothGattCharacteristic? = null
     private var pressureSetpointCharacteristic: BluetoothGattCharacteristic? = null
     private var scaleTareCharacteristic: BluetoothGattCharacteristic? = null
+    private var weightTargetCharacteristic: BluetoothGattCharacteristic? = null
+
+    // Once per process, not per connection: a mid-session reconnect must not
+    // re-zero a tray that already has a cup on it.
+    private var autoTareDone = false
 
     private val history = ArrayDeque<GraphSample>()
 
@@ -89,6 +94,7 @@ class Tier1BleClient(context: Context) {
     private val writeLock = Any()
     private val writeQueue = ArrayDeque<Pair<BluetoothGattCharacteristic, ByteArray>>()
     private var writeInProgress = false
+    private var writeRetries = 0
     private val writeHandler = Handler(Looper.getMainLooper())
     private var writeWatchdog: Runnable? = null
 
@@ -171,6 +177,8 @@ class Tier1BleClient(context: Context) {
                 pressureSetpointCharacteristic =
                     service.getCharacteristic(Tier1Gatt.pressureSetpointUuid)
                 scaleTareCharacteristic = service.getCharacteristic(Tier1Gatt.scaleTareUuid)
+                weightTargetCharacteristic =
+                    service.getCharacteristic(Tier1Gatt.weightTargetUuid)
                 if (stateCharacteristic == null || setpointCharacteristic == null) {
                     fail("Missing Tier 2 characteristics")
                     return
@@ -357,6 +365,18 @@ class Tier1BleClient(context: Context) {
         }
     }
 
+    // Arms the firmware-side stop-on-weight. Passing 0 disables it.
+    fun writeWeightTarget(grams: Float) {
+        val characteristic = weightTargetCharacteristic ?: return
+        writeChar(characteristic, grams.toLeFloatBytes())
+        val current = _uiState.value.machineState
+        if (current != null) {
+            _uiState.value = _uiState.value.copy(
+                machineState = current.copy(weightTargetG = grams),
+            )
+        }
+    }
+
     // Zeroes the drip tray at its current load. Nothing is reflected optimistically:
     // the next MachineState notification carries the tared reading.
     fun writeScaleTare() {
@@ -400,12 +420,6 @@ class Tier1BleClient(context: Context) {
     fun writePreinfusion(seconds: Float) {
         val characteristic = preinfusionCharacteristic ?: return
         _uiState.value = _uiState.value.copy(preinfusionSec = seconds)
-        writeChar(characteristic, seconds.toLeFloatBytes())
-    }
-
-    fun writePumpRamp(seconds: Float) {
-        val characteristic = pumpRampCharacteristic ?: return
-        _uiState.value = _uiState.value.copy(pumpRampSec = seconds)
         writeChar(characteristic, seconds.toLeFloatBytes())
     }
 
@@ -505,11 +519,25 @@ class Tier1BleClient(context: Context) {
         android.util.Log.w("EssoBLE",
             "writeChar uuid=${characteristic.uuid} len=${bytes.size} ok=$ok")
         if (!ok) {
-            // The stack refused to even queue it (e.g. busy); release the slot
-            // and move on so one bad write can't wedge the rest of the queue.
-            finishWrite()
+            // The stack refuses a write while another operation is in flight,
+            // which on connect means anything sent around the CCCD write is
+            // rejected. Put it back and retry instead of dropping it: a lost
+            // setpoint or tare fails silently and looks like the machine
+            // ignoring the operator. Bounded so a write that can never land
+            // cannot wedge the queue.
+            synchronized(writeLock) {
+                writeInProgress = false
+                if (writeRetries < MAX_WRITE_RETRIES) {
+                    writeRetries++
+                    writeQueue.addFirst(characteristic to bytes)
+                } else {
+                    writeRetries = 0
+                }
+            }
+            writeHandler.postDelayed({ dispatchNextWrite() }, WRITE_RETRY_MS)
             return
         }
+        writeRetries = 0
         // Watchdog: if onCharacteristicWrite never fires, free the slot anyway.
         writeWatchdog?.let { writeHandler.removeCallbacks(it) }
         val watchdog = Runnable { finishWrite() }
@@ -596,6 +624,7 @@ class Tier1BleClient(context: Context) {
         brewProfileCharacteristic = null
         pressureSetpointCharacteristic = null
         scaleTareCharacteristic = null
+        weightTargetCharacteristic = null
         history.clear()
         writeWatchdog?.let { writeHandler.removeCallbacks(it) }
         writeWatchdog = null
@@ -607,6 +636,14 @@ class Tier1BleClient(context: Context) {
 
     private fun publishMachineState(bytes: ByteArray) {
         val state = MachineState.fromBytes(bytes) ?: return
+        // Zero the tray once per app start, on the first state that proves the
+        // machine is idle. Deferred to here rather than done on connect because
+        // only a state tells us a shot is not already running, and re-taring
+        // under a cup mid-shot would throw the yield away.
+        if (!autoTareDone && !state.brewing) {
+            autoTareDone = true
+            writeScaleTare()
+        }
         appendHistory(state)
         _uiState.value =
             _uiState.value.copy(
@@ -668,6 +705,10 @@ class Tier1BleClient(context: Context) {
 
         // Watchdog fallback if a write's onCharacteristicWrite callback is lost.
         private const val WRITE_TIMEOUT_MS = 2_000L
+
+        // Backoff for a write the stack refused because it was busy.
+        private const val WRITE_RETRY_MS = 80L
+        private const val MAX_WRITE_RETRIES = 10
 
         private fun floatOf(bytes: ByteArray): Float? {
             if (bytes.size < 4) return null

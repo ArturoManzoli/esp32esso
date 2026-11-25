@@ -44,6 +44,15 @@ interface CoffeeDao {
     @Delete
     suspend fun deleteRecipe(recipe: RecipeEntity)
 
+    @Query("SELECT * FROM brew_profiles ORDER BY name COLLATE NOCASE")
+    fun brewProfiles(): Flow<List<ProfileEntity>>
+
+    @Upsert
+    suspend fun upsertBrewProfile(profile: ProfileEntity): Long
+
+    @Delete
+    suspend fun deleteBrewProfile(profile: ProfileEntity)
+
     @Query("SELECT * FROM shots ORDER BY savedAtEpochMs DESC")
     fun shots(): Flow<List<ShotEntity>>
 

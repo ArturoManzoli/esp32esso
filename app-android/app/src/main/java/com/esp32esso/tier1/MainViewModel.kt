@@ -11,6 +11,7 @@ import com.esp32esso.tier1.ble.Tier1BleClient
 import com.esp32esso.tier1.data.BeanEntity
 import com.esp32esso.tier1.data.CoffeeRepository
 import com.esp32esso.tier1.data.GrinderEntity
+import com.esp32esso.tier1.data.ProfileEntity
 import com.esp32esso.tier1.data.RecipeEntity
 import com.esp32esso.tier1.data.ShotEntity
 import com.esp32esso.tier1.data.ShotSamples
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -95,6 +97,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val shots: StateFlow<List<ShotEntity>> =
         repo.shots.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    // Operator-drawn profiles, decoded from their stored vertex timelines.
+    val userProfiles: StateFlow<List<UserProfile>> =
+        repo.brewProfiles
+            .map { rows ->
+                rows.map { row ->
+                    UserProfile(
+                        id = row.id,
+                        name = row.name,
+                        notes = row.notes,
+                        vertices = UserProfile.parseVertices(row.verticesJson),
+                    )
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // Everything the profile dropdown can run: the operator's own drawn profiles
+    // first, then the transcribed library.
+    val selectableProfiles: StateFlow<List<BrewProfile>> =
+        userProfiles
+            .map { own -> own.map { it.toBrewProfile() } + BrewProfileLibrary.profiles }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                BrewProfileLibrary.profiles,
+            )
+
+    val selectedProfile: StateFlow<BrewProfile?> =
+        combine(_selectedProfileId, selectableProfiles) { id, all ->
+            all.firstOrNull { it.id == id }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     // Push the selected brew profile once per link, after bring-up is idle.
     // Writing earlier races Android's single in-flight GATT op against MTU /
     // CCCD / the config read chain: that used to drop notify enable (Connected
@@ -114,11 +147,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (machine != null && state.pumpRampSec != null && !profilePushedThisLink) {
                     profilePushedThisLink = true
-                    client.writeBrewProfile(BrewProfileLibrary.byId(_selectedProfileId.value))
+                    client.writeBrewProfile(resolveProfile(_selectedProfileId.value))
+                    // Zero the tray on every fresh link: the cup/basket sitting
+                    // on it at connect time is the operator's baseline, and the
+                    // cells drift between sessions. The delay keeps the tare off
+                    // the tail of the bring-up write burst and gives the filter
+                    // a full window of samples to settle on first.
+                    viewModelScope.launch {
+                        delay(CONNECT_TARE_DELAY_MS)
+                        client.writeScaleTare()
+                    }
                 }
             }
         }
     }
+
+    // The profile behind a persisted selection id. Custom ids ("user:<row>") are
+    // only resolvable once Room has emitted, which is why the connect-time push
+    // reads through here rather than the bundled library alone.
+    private fun resolveProfile(id: String?): BrewProfile? =
+        id?.let { wanted -> selectableProfiles.value.firstOrNull { it.id == wanted } }
 
     private fun trackBrew(machine: MachineState) {
         val brewing = machine.brewing
@@ -137,6 +185,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val target = machine.groupSetpointC
             val thermoblockOffset = machine.thermoblockOffsetC
             val thermoblockManual = machine.thermoblockManual
+            // Read at shot end rather than after the post-shot hold, so switching
+            // profiles while the report settles cannot relabel the shot.
+            val profileName = resolveProfile(_selectedProfileId.value)?.name.orEmpty()
             postShotJob =
                 viewModelScope.launch {
                     delay(POST_SHOT_HOLD_MS)
@@ -156,6 +207,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 preinfusionSec = preinfusion,
                                 thermoblockOffsetC = thermoblockOffset,
                                 thermoblockManual = thermoblockManual,
+                                profileName = profileName,
                                 history = client.uiState.value.history,
                             )
                         _pendingReport.value = built
@@ -245,10 +297,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setProfileBrewing(active: Boolean) = client.writeBrew(active, useProfile = true)
     fun setHeaterEnabled(enabled: Boolean) = client.writeHeaterEnabled(enabled)
     fun applyPreinfusion(seconds: Float) = client.writePreinfusion(seconds)
-    fun applyPumpRamp(seconds: Float) = client.writePumpRamp(seconds)
-
-    // Select (or clear, with null) the bundled pressure/flow profile. Persists
-    // the choice locally and pushes the phase program to the firmware.
+    // Select (or clear, with null) the pressure/flow profile to run — bundled or
+    // operator-drawn. Persists the choice locally and pushes the phase program
+    // to the firmware.
     fun applyBrewProfile(profile: BrewProfile?) {
         _selectedProfileId.value = profile?.id
         profilePrefs.edit().apply {
@@ -259,6 +310,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun triggerFlush() = client.writeFlush(true)
     fun stopFlush() = client.writeFlush(false)
     fun tareScale() = client.writeScaleTare()
+    // Grams at which the firmware cuts the shot; 0 clears the stop.
+    fun applyWeightTarget(grams: Float) = client.writeWeightTarget(grams)
 
     fun upsertBean(bean: BeanEntity) = viewModelScope.launch { repo.upsert(bean) }
     fun deleteBean(bean: BeanEntity) = viewModelScope.launch { repo.delete(bean) }
@@ -268,6 +321,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteWater(water: WaterEntity) = viewModelScope.launch { repo.delete(water) }
     fun upsertRecipe(recipe: RecipeEntity) = viewModelScope.launch { repo.upsert(recipe) }
     fun deleteRecipe(recipe: RecipeEntity) = viewModelScope.launch { repo.delete(recipe) }
+
+    // Save a drawn profile. When it is the one currently selected, the edited
+    // program is pushed straight to the firmware so the next pull runs the shape
+    // the operator just left the editor with.
+    fun upsertUserProfile(profile: UserProfile) = viewModelScope.launch {
+        val id = repo.upsert(
+            ProfileEntity(
+                id = profile.id,
+                name = profile.name,
+                notes = profile.notes,
+                verticesJson = profile.toJson(),
+                savedAtEpochMs = System.currentTimeMillis(),
+            ),
+        )
+        val saved = profile.copy(id = if (profile.id == 0L) id else profile.id)
+        if (_selectedProfileId.value == UserProfile.wireId(saved.id)) {
+            client.writeBrewProfile(saved.toBrewProfile())
+        }
+    }
+
+    // Removing the running profile also clears it firmware-side, so a shot can
+    // never keep executing a program the operator just deleted.
+    fun deleteUserProfile(profile: UserProfile) = viewModelScope.launch {
+        if (_selectedProfileId.value == UserProfile.wireId(profile.id)) {
+            applyBrewProfile(null)
+        }
+        repo.delete(
+            ProfileEntity(
+                id = profile.id,
+                name = profile.name,
+                notes = profile.notes,
+                verticesJson = profile.toJson(),
+            ),
+        )
+    }
 
     // Persist a fresh ShotEntity for `report` (called on "Show report" so every
     // opened report ends up in the library). The generated row id is delivered
@@ -287,6 +375,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     finalGroupC = report.finalGroupC,
                     thermoblockOffsetC = report.thermoblockOffsetC.takeUnless { it.isNaN() },
                     thermoblockManual = report.thermoblockManual,
+                    profileName = report.profileName,
                     samplesJson = ShotSamples.encode(report.samples),
                 ),
             )
@@ -336,6 +425,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val MIN_CALIBRATION_SHOT_MS = 20_000L
         private const val PROFILE_PREFS = "esso_brew_profile"
         private const val PROFILE_KEY = "selected_id"
+        private const val CONNECT_TARE_DELAY_MS = 1_000L
 
         private fun buildReport(
             durationMs: Long,
@@ -345,6 +435,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             preinfusionSec: Float,
             thermoblockOffsetC: Float,
             thermoblockManual: Boolean,
+            profileName: String,
             history: List<com.esp32esso.tier1.ble.GraphSample>,
         ): ShotReport {
             val from = startUptime - REPORT_PAD_MS
@@ -368,6 +459,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 peakGroupC = peakGroup,
                 thermoblockOffsetC = thermoblockOffsetC,
                 thermoblockManual = thermoblockManual,
+                profileName = profileName,
                 samples = slice,
                 shotStartUptimeMs = startUptime,
                 shotEndUptimeMs = endUptime,

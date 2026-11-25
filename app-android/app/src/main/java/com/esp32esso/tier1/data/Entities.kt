@@ -55,6 +55,18 @@ data class RecipeEntity(
     val notes: String = "",
 )
 
+// Operator-drawn brew profile. The timeline itself lives in `verticesJson` (see
+// UserProfile.toJson) rather than a per-vertex table: it is only ever read and
+// written whole, and a dozen points is not worth a join.
+@Entity(tableName = "brew_profiles")
+data class ProfileEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val notes: String = "",
+    val verticesJson: String = "[]",
+    val savedAtEpochMs: Long = 0,
+)
+
 // Persisted shot log. Grades are 0-5 (0 = ungraded). `samplesJson` holds the
 // full ShotReport sample slice in the compact format described in ShotSamples
 // (kept in JSON to sidestep a dedicated per-sample table for now).
@@ -78,6 +90,10 @@ data class ShotEntity(
     // saved before this was tracked.
     val thermoblockOffsetC: Float? = null,
     val thermoblockManual: Boolean = false,
+    // Brew profile armed when the shot ran, stored as its name at that moment so
+    // later edits to the profile cannot rewrite what this shot actually did.
+    // Blank for a shot pulled without a profile.
+    val profileName: String = "",
     // User-editable label shown atop the brew report's Grade card; blank
     // renders as "Untitled Brew" rather than persisting that literal string.
     val name: String = "",
@@ -90,6 +106,7 @@ data class ShotEntity(
     val notes: String = "",
     val bitterness: Int = 0,
     val acidity: Int = 0,
+    val sweetness: Int = 0,
     val body: Int = 0,
     val visuals: Int = 0,
     val overall: Int = 0,

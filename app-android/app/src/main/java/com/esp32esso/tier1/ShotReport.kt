@@ -21,6 +21,11 @@ data class ShotReport(
     // MainViewModel.calculatedThermoblockOffsetC).
     val thermoblockOffsetC: Float = Float.NaN,
     val thermoblockManual: Boolean = false,
+    // Name of the brew profile armed when the shot ran, snapshotted rather than
+    // referenced so renaming or reshaping the profile later cannot rewrite the
+    // history of a shot that has already been pulled. Blank means the shot ran
+    // without a profile.
+    val profileName: String = "",
     // Full slice of samples from (startUptime - 10s) to (endUptime + 10s) so the
     // report graph shows lead-in and cool-down context around the shot itself.
     val samples: List<GraphSample>,
