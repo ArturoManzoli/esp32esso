@@ -98,6 +98,7 @@ const MachineProfile kGaggiaBabyProfile = {
             .opvPressureBar = 9.0f,  // UNVERIFIED: the brass valve may be the boiler safety valve, not an OPV
             .hasThreeWayValve = true,
             .pumpIsVibration = true,
+            .steamRefillBelowBar = 0.0f,
         },
     .brewTempSensor = &g_brewTempSensor,
     .heaterRelay = &g_heaterRelay,

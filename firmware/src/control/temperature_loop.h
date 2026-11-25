@@ -288,6 +288,7 @@ private:
     void updatePreinfusion(uint32_t nowMs);
     void updateFlush(uint32_t nowMs);
     void updatePumpAndBrewValve(uint32_t nowMs);
+    bool updateSteamRefill(uint32_t nowMs);
     void updateProfileExecution(uint32_t nowMs);
     void releaseProfileTemperature();
     void applyPumpDuty(uint32_t nowMs, float duty);
@@ -357,6 +358,12 @@ private:
     bool steamSwitchOn_ = false;
     bool steaming_ = false;
     uint32_t steamSinceMs_ = 0;
+
+    // Steam refill (profile.hydraulic.steamRefillBelowBar, off by default; see
+    // updateSteamRefill). 0 deadlines mean none pending.
+    uint32_t refillBurstUntilMs_ = 0;
+    uint32_t refillGapUntilMs_ = 0;
+    uint32_t refillTotalMs_ = 0;
 
     // Pre-infusion (see setPreinfusionSeconds)
     float preinfusionSec_ = 2.0f;

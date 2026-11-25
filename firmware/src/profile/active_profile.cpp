@@ -36,6 +36,7 @@ const MachineProfile kStubProfile = {
             .opvPressureBar = 10.0f,
             .hasThreeWayValve = false,
             .pumpIsVibration = true,
+            .steamRefillBelowBar = 0.0f,
         },
     .brewTempSensor = nullptr,
     .heaterRelay = nullptr,

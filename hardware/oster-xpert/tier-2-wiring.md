@@ -326,6 +326,13 @@ mode. The stock thermostat in the heater circuit must allow steam temperature
 in this position, as it does with the stock steam switch wiring; otherwise it
 cuts the heater first. `MachineState.steaming` reports the mode.
 
+Boiler machines can also top the boiler up while steaming: a profile that sets
+`hydraulic.steamRefillBelowBar` fires a 1.5 s pump burst with the brew valve
+closed whenever the pressure reading drops below that value, at most one burst
+every 5 s and 15 s of pumping per steam session. It is off (`0`) in every
+profile, including this one, since a thermoblock has no boiler to refill, and it
+has not been tuned on a boiler machine yet.
+
 > [!NOTE]
 > This is the **Standard** (Z-C + DIM) dimmer variant, not DimmerLink
 > (UART/I2C). Older Tier 2 builds used a zero-cross pump SSR on GPIO 32 alone;
