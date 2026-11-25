@@ -23,14 +23,14 @@ in `app-android/.../ble/Tier1Gatt.kt`.
 
 - **Properties:** READ, NOTIFY
 - **CCCD:** required for NOTIFY (standard `0x2902` descriptor)
-- **Payload:** 68-byte little-endian struct, pushed at 4 Hz, or 20 Hz while a
+- **Payload:** 72-byte little-endian struct, pushed at 4 Hz, or 20 Hz while a
   shot is being pulled or the open-loop tuning bench is active (for a smooth
   brew graph; still well within the negotiated 7.5-22.5 ms connection interval).
 
 Every version appends its fields after the previous ones: v4 the manual pressure
 hold (offsets 50-55), v5 `profile_elapsed_sec`, v6 the per-cell drip-tray
-weights. A reader that only consumes the first 52, 56 or 60 bytes still parses
-correctly and can treat the later fields as absent.
+weights, v7 `weight_target_g`. A reader that only consumes the first 52, 56, 60
+or 68 bytes still parses correctly and can treat the later fields as absent.
 
 | Offset | Size | Field | Type | Notes |
 | ------ | ---- | ----- | ---- | ----- |
@@ -60,6 +60,7 @@ correctly and can treat the later fields as absent.
 | 56 | 4 | `profile_elapsed_sec` | `float32` | Position along the running brew profile's own timeline; `NaN` when no profile is driving the pump |
 | 60 | 4 | `weight_left_g` | `float32` | Drip-tray left load cell alone; `NaN` when no scale is bound |
 | 64 | 4 | `weight_right_g` | `float32` | Drip-tray right load cell alone; `NaN` when no scale is bound |
+| 68 | 4 | `weight_target_g` | `float32` | Stop-on-weight target in grams; `0` when disabled (see `WeightTarget`) |
 
 `profile_elapsed_sec` is not the shot clock: a phase that ends early on its
 `stopPressureAbove` jumps the position straight to the next phase's start, so the
@@ -275,6 +276,23 @@ Zeroes the drip-tray scale at its current load, storing a fresh offset per cell.
 The tare is held in RAM only, so it does not survive a reboot; the reading it
 produces comes back through `weight_g` / `weight_left_g` / `weight_right_g` in
 `MachineState`. A write with `0` or an empty payload is ignored.
+
+Each reading is a rolling mean of the last 8 samples per cell. While the tray is
+idle and within 2 g of zero, the zero walks slowly toward the live reading to
+cancel load-cell drift as the machine warms up; a shot or flush suspends that.
+A tare resets both the mean and the tracked zero.
+
+### Characteristic `WeightTarget` — `a7b3c210-000f-4000-8000-000000000001`
+
+- **Properties:** READ, WRITE
+- **Payload:** 4-byte float, grams
+
+A positive value arms stop-on-weight: the firmware ends the running shot, through
+the same path as a `BrewControl` stop, once `weight_g` reaches the target. `0`
+or `NaN` disables it, and values above 500 g are clamped. The accepted value is
+echoed back, persisted to NVS (key `wTarget`) and reported in
+`MachineState.weight_target_g`. The comparison is against the tray total, so tare
+with the empty cup in place.
 
 ## Security (Tier 2 MVP)
 

@@ -98,6 +98,10 @@ constexpr float kProfileFlowLimitKp = 0.05f;
 // peg it at full duty while reporting a target it can never reach.
 constexpr float kMaxManualPressureBar = 12.0f;
 
+// Ceiling for a stop-on-weight target. Well past any espresso yield, but low
+// enough that a stray write cannot arm a target the shot would never reach.
+constexpr float kMaxTargetWeightG = 500.0f;
+
 // Interpolated target of a profile phase at `elapsedSec` into it: ramps
 // targetStart -> targetEnd across transitionSec (eased for curve 2), then holds
 // targetEnd for the rest of the phase.
@@ -222,13 +226,15 @@ void TemperatureLoop::tick(uint32_t nowMs) {
         profile_->brewTempSensor == nullptr) {
         return;
     }
+    // Ahead of the brew state so a stop-on-weight target is judged against this
+    // tick's sample rather than the previous one.
+    updateScale();
     updateBrewState(nowMs);
     updatePreinfusion(nowMs);
     updateFlush(nowMs);
     updatePumpAndBrewValve(nowMs);
     updateReliefValve(nowMs);
     updatePressure();
-    updateScale();
     updateHeaterTimeout(nowMs);
     if (cal_.active) {
         runCalibrationStep(nowMs);
@@ -425,6 +431,14 @@ uint32_t TemperatureLoop::shotElapsedMs(uint32_t nowMs) const {
 }
 
 void TemperatureLoop::updateBrewState(uint32_t nowMs) {
+    // Stop-on-weight drops the same flag the app's stop writes, so the shot ends
+    // through one path and still gets its profile teardown and vent pulse.
+    if (manualBrew_ && targetWeightG_ > 0.0f) {
+        const float total = weightTotalGrams();
+        if (!std::isnan(total) && total >= targetWeightG_) {
+            manualBrew_ = false;
+        }
+    }
     const bool active = manualBrew_;
     if (active && !brewing_) {
         brewing_ = true;
@@ -832,8 +846,60 @@ void TemperatureLoop::updateScale() {
         return;
     }
     const auto& cal = profile_->scale->calibration();
-    weightLeftG_ = static_cast<float>(left - cal.offsetLeft) / cal.countsPerGramLeft;
-    weightRightG_ = static_cast<float>(right - cal.offsetRight) / cal.countsPerGramRight;
+    weightSamplesLeftG_[weightSampleIndex_] =
+        static_cast<float>(left - cal.offsetLeft) / cal.countsPerGramLeft;
+    weightSamplesRightG_[weightSampleIndex_] =
+        static_cast<float>(right - cal.offsetRight) / cal.countsPerGramRight;
+    weightSampleIndex_ = (weightSampleIndex_ + 1) % kWeightFilterSamples;
+    if (weightSampleCount_ < kWeightFilterSamples) ++weightSampleCount_;
+
+    // ponytail: a flat rolling mean, so the reported weight trails a pour by
+    // half the window (~0.4 s at 10 SPS, under a gram at espresso flow rates).
+    // Wiring the HX711 RATE pin for 80 SPS shrinks that window eightfold if the
+    // stop ever needs to land tighter.
+    float sumLeft = 0.0f;
+    float sumRight = 0.0f;
+    for (uint8_t i = 0; i < weightSampleCount_; ++i) {
+        sumLeft += weightSamplesLeftG_[i];
+        sumRight += weightSamplesRightG_[i];
+    }
+    const float meanLeft = sumLeft / weightSampleCount_;
+    const float meanRight = sumRight / weightSampleCount_;
+
+    trackScaleZero(meanLeft, meanRight);
+    weightLeftG_ = meanLeft - zeroLeftG_;
+    weightRightG_ = meanRight - zeroRightG_;
+}
+
+// Load cells creep with temperature, and this tray sits on a machine that warms
+// up, so a tare goes stale by a few grams an hour. Walk the zero back toward the
+// live reading while the tray is quiet and near-empty, the way any bench scale
+// does. Anything heavier than the band is real load and pins the zero where it
+// is; a shot or a flush suspends tracking outright so coffee landing in the cup
+// is never mistaken for drift.
+void TemperatureLoop::trackScaleZero(float meanLeftG, float meanRightG) {
+    constexpr float kZeroTrackBandG = 2.0f;
+    constexpr float kZeroTrackStepG = 0.005f;  // 0.05 g/s at 10 SPS
+    if (brewing_ || flushing_) {
+        return;
+    }
+    const float leftErr = meanLeftG - zeroLeftG_;
+    const float rightErr = meanRightG - zeroRightG_;
+    if (std::fabs(leftErr + rightErr) > kZeroTrackBandG) {
+        return;
+    }
+    zeroLeftG_ += std::fmax(-kZeroTrackStepG, std::fmin(kZeroTrackStepG, leftErr));
+    zeroRightG_ += std::fmax(-kZeroTrackStepG, std::fmin(kZeroTrackStepG, rightErr));
+}
+
+void TemperatureLoop::setTargetWeightGrams(float grams) {
+    if (std::isnan(grams) || grams <= 0.0f) {
+        targetWeightG_ = 0.0f;
+        return;
+    }
+    if (grams > kMaxTargetWeightG) grams = kMaxTargetWeightG;
+    targetWeightG_ = grams;
+    activityPending_ = true;
 }
 
 bool TemperatureLoop::tareScale() {
@@ -843,6 +909,13 @@ bool TemperatureLoop::tareScale() {
     if (!profile_->scale->tare()) {
         return false;
     }
+    // Drop the filter window and the tracked zero with it: both describe the
+    // load that just became the new origin, and averaging across that step would
+    // drag the reading back toward the old one for a second.
+    weightSampleIndex_ = 0;
+    weightSampleCount_ = 0;
+    zeroLeftG_ = 0.0f;
+    zeroRightG_ = 0.0f;
     weightLeftG_ = 0.0f;
     weightRightG_ = 0.0f;
     activityPending_ = true;
