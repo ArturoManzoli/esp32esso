@@ -64,8 +64,8 @@ the safety probe and as the ceiling the heater rolls off against. See
 | Heater SSR | GPIO **23** (D23) | GPIO 4 |
 | Pump dimmer DIM (gate) | GPIO 32 | GPIO 6 |
 | Pump dimmer Z-C (zero-cross) | GPIO 33 | GPIO 9 |
-| Brew-valve SSR (valve alone) | GPIO 27 | GPIO 5 |
-| Relief-valve SSR (optional) | GPIO 26 | GPIO 14 |
+| Brew-valve SSR (valve alone) | GPIO 26 | GPIO 5 |
+| Relief-valve SSR (optional) | GPIO 27 | GPIO 14 |
 | Pressure divider node (ADC, optional) | GPIO 35 (ADC1_CH7, input-only) | GPIO 8 (ADC1_CH7) |
 
 The **group** amp sits on the primary `CS` (GPIO 21 / GPIO 10) in both builds.
@@ -256,7 +256,7 @@ sensor OUT ──[ 10 kΩ 1% ]──┬── ADC pin (GPIO 35 / GPIO 8)
 
 The **Start shot** / **Stop shot** buttons in the app drive two separate
 actuators: a **Standard AC phase-dimmer** on the vibration pump (DIM + Z-C)
-and a **brew-valve SSR** (GPIO 27 WROOM / GPIO 5 S3). While a shot is running
+and a **brew-valve SSR** (GPIO 26 WROOM / GPIO 5 S3). While a shot is running
 the firmware holds the brew-valve SSR **on** plainly (no PWM: chopping a
 solenoid would chatter/buzz it) and sets the pump dimmer's conduction angle
 from the soft-start ramp / brew profile (see
@@ -272,9 +272,12 @@ Stopping the shot drops both, and the relief-valve pulse fires (see below).
 
 On the AC side the dimmer needs **L**, **N**, and **OUT** (to the pump hot).
 Unlike a series SSR, **N must be connected** for zero-cross detection. The brew
-valve keeps its own SSR: **IN** to its GPIO above and **GND** (common 5 V
-dual-channel boards are usually **active LOW**: 0 V = ON), AC load side as
-before (one leg on **L**, SSR between load and **N**).
+valve keeps its own SSR: **IN** to its GPIO above and **GND**, AC load side as
+before (one leg on **L**, SSR between load and **N**). The firmware expects an
+**active LOW** board for both valves (0 V = ON), as on the common 5 V SSR
+boards. Check the trigger spec on the listing: the board must read 3.3 V as
+off (typically "2.5 - 5 V = off"). A high-level-trigger board would hold both
+valves open whenever the machine is idle.
 
 The stock front-panel brew switch is **not** read by the firmware on this build;
 brewing is app-only unless you add a separate input later.
@@ -302,12 +305,12 @@ heater SSR — same brick, same drive caveats (see
 
 | Signal | ESP32-WROOM (`esp32-oster-xpert`) | ESP32-S3 (`esp32-s3-oster-xpert`) |
 | ------ | --------------------------------- | --------------------------------- |
-| Relief-valve SSR (DC control) | GPIO **26** | GPIO **14** |
+| Relief-valve SSR (DC control) | GPIO **27** | GPIO **14** |
 
 ```text
 Mains L ──[ 2nd SSR (load) ]── solenoid valve ── Mains N
 
-SSR DC + ── ESP32 GPIO 26 / GPIO 14   (5 V transistor stage if 3.3 V is marginal)
+SSR DC + ── ESP32 GPIO 27 / GPIO 14   (5 V transistor stage if 3.3 V is marginal)
 SSR DC - ── ESP32 GND
 ```
 

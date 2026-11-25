@@ -12,7 +12,7 @@ namespace esp32esso::board {
 // a boot-strapping pin, but it only has to idle HIGH (its reset default, which
 // is exactly how an unselected CS sits), so it is safe as a CS here. Tier 2
 // also adds a pump phase-dimmer (DIM GPIO 32, Z-C GPIO 33), a brew-valve SSR
-// (GPIO 27), and a relief-valve output (GPIO 26); all unused until Tier 2.
+// (GPIO 26), and a relief-valve output (GPIO 27); all unused until Tier 2.
 // Tier 4 adds the drip-tray scale: one shared HX711 clock (GPIO 22) and a data
 // pin per amp (GPIO 16, 17). GPIO 16/17 are free on a WROOM module but back the
 // PSRAM on a WROVER; on a WROVER-based DevKit move them to GPIO 25 and 13.
@@ -34,8 +34,8 @@ const BoardConfig& activeBoard() {
                 .heaterSsr = 23,  // D23 on the 38-pin WROOM DevKit
                 .pumpSsr = 32,  // pump dimmer DIM (gate)
                 .pumpZc = 33,   // pump dimmer zero-cross
-                .brewValveSsr = 27,  // brew valve alone, plain on/off
-                .solenoidValve = 26,  // second SSR/MOSFET: relief/vent valve
+                .brewValveSsr = 26,  // brew valve alone, plain on/off
+                .solenoidValve = 27,  // second SSR/MOSFET: relief/vent valve
                 .pressureAdc = 35,  // ADC1_CH7, input-only: brew-line transducer
                 .scaleSck = 22,        // HX711 clock, shared by both amps
                 .scaleDoutLeft = 16,   // HX711 data, left drip-tray cell
