@@ -151,6 +151,8 @@ const MachineProfile kOsterXpertProfile = {
             .opvPressureBar = 10.0f,
             .hasThreeWayValve = false,  // UNVERIFIED - inspect during teardown
             .pumpIsVibration = true,
+            // Off: a thermoblock has no boiler to top up.
+            .steamRefillBelowBar = 0.0f,
         },
     .brewTempSensor = &g_brewTempSensor,
     .heaterRelay = &g_heaterRelay,

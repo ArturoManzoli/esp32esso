@@ -63,6 +63,10 @@ struct HydraulicConfig {
     float opvPressureBar;
     bool hasThreeWayValve;
     bool pumpIsVibration;
+    // Steam refill: while steaming, a pressure reading below this many bar
+    // fires a short pump burst with the brew valve closed, topping the boiler
+    // up. 0 disables it, which is the default for every profile.
+    float steamRefillBelowBar;
 };
 
 // Concrete peripherals are bound by the profile at boot. Optional pointers

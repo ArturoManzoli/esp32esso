@@ -26,6 +26,13 @@ constexpr uint32_t kPanelShotMaxMs = 60UL * 1000UL;
 // forgotten switch does not hold the boiler at steam temperature indefinitely.
 constexpr uint32_t kSteamMaxMs = 5UL * 60UL * 1000UL;
 
+// Steam refill hard limits. A burst is short and spaced so the boiler recovers
+// between them, and a session's total pump time is capped so a pressure reading
+// that never climbs (a failed sensor, an open wand) cannot flood the boiler.
+constexpr uint32_t kRefillBurstMs = 1500;
+constexpr uint32_t kRefillGapMs = 5000;
+constexpr uint32_t kRefillMaxTotalMs = 15UL * 1000UL;
+
 // Pump soft-start (pressure ramp). With a phase-angle dimmer the duty is
 // conduction angle; the legacy zero-cross SSR path still time-proportions
 // across kPumpRampWindowMs (10 Hz). kPumpRampStartDuty is the duty at the
@@ -203,6 +210,9 @@ void TemperatureLoop::begin(const profile::MachineProfile& profile) {
     panelShot_ = false;
     steamSwitchOn_ = false;
     steaming_ = false;
+    refillBurstUntilMs_ = 0;
+    refillGapUntilMs_ = 0;
+    refillTotalMs_ = 0;
     preinfusionPhase_ = 0;
     preinfusionPhaseStartMs_ = 0;
     pumpRampSec_ = 0.0f;
@@ -544,6 +554,7 @@ void TemperatureLoop::updateSteamSwitch(uint32_t nowMs) {
     if (on && !steamSwitchOn_) {
         steaming_ = true;
         steamSinceMs_ = nowMs;
+        refillTotalMs_ = 0;
         setHeaterEnabled(true);
         Serial.printf("# steam: on, target %.1f C\n", static_cast<double>(steamSetpoint_));
     } else if (!on && steaming_) {
@@ -639,6 +650,9 @@ void TemperatureLoop::updatePumpAndBrewValve(uint32_t nowMs) {
             return;
         }
     }
+    if (updateSteamRefill(nowMs)) {
+        return;
+    }
     // Pump/valve run whenever brewing (except during the pre-infusion bloom
     // pause, phase 2), or during an operator-triggered grouphead flush. The
     // relief valve is held closed for both cases (see updateReliefValve) so
@@ -702,6 +716,48 @@ void TemperatureLoop::updatePumpAndBrewValve(uint32_t nowMs) {
     }
 
     applyPumpDuty(nowMs, duty);
+}
+
+// Returns true while a refill burst owns the pump this tick.
+bool TemperatureLoop::updateSteamRefill(uint32_t nowMs) {
+    const float belowBar = profile_->hydraulic.steamRefillBelowBar;
+    if (!steaming_ || belowBar <= 0.0f || brewing_ || flushing_) {
+        refillBurstUntilMs_ = 0;
+        return false;
+    }
+    if (refillBurstUntilMs_ != 0) {
+        if (static_cast<int32_t>(refillBurstUntilMs_ - nowMs) > 0) {
+            if (profile_->brewValveRelay) {
+                profile_->brewValveRelay->set(false);
+            }
+            applyPumpDuty(nowMs, 1.0f);
+            return true;
+        }
+        refillBurstUntilMs_ = 0;
+        refillGapUntilMs_ = nowMs + kRefillGapMs;
+        return false;
+    }
+    if (refillGapUntilMs_ != 0) {
+        if (static_cast<int32_t>(refillGapUntilMs_ - nowMs) > 0) {
+            return false;
+        }
+        refillGapUntilMs_ = 0;
+    }
+    if (refillTotalMs_ + kRefillBurstMs > kRefillMaxTotalMs || !pressureOk_ ||
+        std::isnan(pressureBar_) || pressureBar_ >= belowBar) {
+        return false;
+    }
+    refillBurstUntilMs_ = nowMs + kRefillBurstMs;
+    if (refillBurstUntilMs_ == 0) refillBurstUntilMs_ = 1;  // 0 means idle
+    refillTotalMs_ += kRefillBurstMs;
+    Serial.printf("# steam: refill burst at %.2f bar (%lu ms used)\n",
+                  static_cast<double>(pressureBar_),
+                  static_cast<unsigned long>(refillTotalMs_));
+    if (profile_->brewValveRelay) {
+        profile_->brewValveRelay->set(false);
+    }
+    applyPumpDuty(nowMs, 1.0f);
+    return true;
 }
 
 float TemperatureLoop::brewProfileElapsedSec(uint32_t nowMs) const {
