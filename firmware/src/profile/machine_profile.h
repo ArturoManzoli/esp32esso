@@ -105,6 +105,11 @@ struct MachineProfile {
 // of which is wrapped in an `#if defined(ESP32ESSO_PROFILE_<NAME>)` guard.
 extern const MachineProfile& activeProfile();
 
+// Drives every mains-switching output to its idle level. Called as the first
+// statement of setup(), before Serial and the sensors, since these pins leave
+// reset floating and a floating SSR/TRIAC gate can conduct.
+extern void silenceMainsOutputs();
+
 // Performs any one-time hardware initialisation needed by the active
 // profile (SPI bus, pinMode, etc.). Called from setup() exactly once,
 // after Serial.begin().

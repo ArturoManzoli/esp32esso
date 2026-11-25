@@ -466,6 +466,14 @@ void emitCalSettledSample(uint32_t nowMs) {
 }  // namespace
 
 void setup() {
+    // Mains-side gates first, before anything that can take time. They leave
+    // reset as floating inputs, and a floating SSR or TRIAC gate picks up
+    // enough to conduct part of each half-cycle -- on the relief valve that is
+    // an audible 60 Hz buzz until the pin is driven. Doing it here bounds the
+    // window to a few instructions instead of the whole init sequence; the ROM
+    // bootloader's own window is only reachable with a resistor at the module.
+    esp32esso::profile::silenceMainsOutputs();
+
     Serial.begin(115200);
     delay(100);
 
