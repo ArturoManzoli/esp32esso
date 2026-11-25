@@ -251,6 +251,12 @@ sensor OUT ──[ 10 kΩ 1% ]──┬── ADC pin (GPIO 35 / GPIO 8)
 - **Digital sensors.** An I²C pressure sensor (e.g. a board around an
   Honeywell/TE part) skips the divider and ADC noise entirely, at higher cost
   and a different driver — wire it to the I²C pins instead of an ADC channel.
+- **ADS1115 (optional).** Keeps the same transducer and 2:1 divider but reads
+  the divider node with an external ADS1115 instead of the ESP32 ADC, for a
+  steadier, more linear reading. Power the ADS1115 from **3V3**, divider node to
+  **AIN0**, `ADDR` to GND (address `0x48`), `SDA`/`SCL` to GPIO 4/14 (WROOM) or
+  GPIO 1/2 (S3). Build with `-DESP32ESSO_PRESSURE_ADS1115=1` in place of
+  `-DESP32ESSO_PRESSURE_ADC=1`.
 
 ## Pump dimmer + brew-valve SSR (app-controlled, two independent channels)
 

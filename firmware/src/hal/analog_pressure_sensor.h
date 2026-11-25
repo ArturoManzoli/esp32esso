@@ -27,6 +27,12 @@ struct PressureCalibration {
     float zeroClampBar = -0.5f;        // readings below this are treated as fault
 };
 
+// Gauge pressure from the divider-node voltage. Returns NaN and clears `ok`
+// when the calibration is unusable or the reading sits below zeroClampBar (an
+// unpowered or unplugged transducer). Shared by every front end that reads the
+// same divider, whatever converter digitises it.
+float pressureBarFromPinMillivolts(const PressureCalibration& cal, float pinMv, bool& ok);
+
 class AnalogPressureSensor : public PressureSensor {
 public:
     AnalogPressureSensor(uint8_t adcPin, const PressureCalibration& cal = PressureCalibration());
