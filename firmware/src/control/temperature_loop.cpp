@@ -14,6 +14,14 @@ constexpr float kMaxBrewSetpointC = 110.0f;  // brew target never needs to excee
 constexpr uint32_t kFlushDurationMs = 3000;  // grouphead flush pulse length
 constexpr uint32_t kPostShotVentMs = 4000;   // relief-valve vent pulse after a shot
 
+// Panel brew input. Releasing an input held at least kBrewSwitchHoldMs ends the
+// shot (a latching rocker); a shorter press leaves it running (a momentary
+// button, pressed again to stop). A panel shot nobody may be watching is always
+// capped at kPanelShotMaxMs.
+// ponytail: compile-time cap; make it a BLE setting if machines need different limits.
+constexpr uint32_t kBrewSwitchHoldMs = 1000;
+constexpr uint32_t kPanelShotMaxMs = 60UL * 1000UL;
+
 // Pump soft-start (pressure ramp). With a phase-angle dimmer the duty is
 // conduction angle; the legacy zero-cross SSR path still time-proportions
 // across kPumpRampWindowMs (10 Hz). kPumpRampStartDuty is the duty at the
@@ -186,6 +194,9 @@ void TemperatureLoop::begin(const profile::MachineProfile& profile) {
     manualBrew_ = false;
     brewSource_ = 0;
     shotStartMs_ = 0;
+    brewSwitchPrimed_ = false;
+    brewSwitchOn_ = false;
+    panelShot_ = false;
     preinfusionPhase_ = 0;
     preinfusionPhaseStartMs_ = 0;
     pumpRampSec_ = 0.0f;
@@ -236,6 +247,7 @@ void TemperatureLoop::tick(uint32_t nowMs) {
     // Ahead of the brew state so a stop-on-weight target is judged against this
     // tick's sample rather than the previous one.
     updateScale();
+    updateBrewSwitch(nowMs);
     updateBrewState(nowMs);
     updatePreinfusion(nowMs);
     updateFlush(nowMs);
@@ -345,6 +357,7 @@ bool TemperatureLoop::hasGroupSensor() const {
 
 void TemperatureLoop::setManualBrew(bool on, bool useProfile) {
     manualBrew_ = on;
+    panelShot_ = false;
     if (on) {
         brewUseProfile_ = useProfile;
     }
@@ -467,6 +480,55 @@ uint32_t TemperatureLoop::shotElapsedMs(uint32_t nowMs) const {
     return nowMs - shotStartMs_;
 }
 
+void TemperatureLoop::updateBrewSwitch(uint32_t nowMs) {
+    if (profile_->brewSwitch == nullptr) {
+        return;
+    }
+    const bool on = profile_->brewSwitch->read();
+    if (!brewSwitchPrimed_) {
+        brewSwitchPrimed_ = true;
+        brewSwitchOn_ = on;
+        return;
+    }
+    if (on && !brewSwitchOn_) {
+        brewSwitchSinceMs_ = nowMs;
+        // Without the phone, the panel is the only way back from the
+        // inactivity cut-off, so any press re-arms the heater.
+        setHeaterEnabled(true);
+        if (manualBrew_) {
+            manualBrew_ = false;
+        } else {
+            setManualBrew(true, /*useProfile=*/true);
+            panelShot_ = true;
+        }
+    } else if (!on && brewSwitchOn_ && panelShot_ &&
+               (nowMs - brewSwitchSinceMs_) >= kBrewSwitchHoldMs) {
+        manualBrew_ = false;
+    }
+    brewSwitchOn_ = on;
+
+    if (!brewing_ || !panelShot_) {
+        return;
+    }
+    if ((nowMs - shotStartMs_) >= kPanelShotMaxMs) {
+        manualBrew_ = false;
+        return;
+    }
+    // A profile shot from the panel ends with its last phase, since there is no
+    // phone to stop it; a final phase with no duration holds until the cap.
+    const float elapsed = brewProfileElapsedSec(nowMs);
+    if (std::isnan(elapsed) || profilePhases_[profilePhaseCount_ - 1].durationSec <= 0.0f) {
+        return;
+    }
+    float totalSec = 0.0f;
+    for (uint8_t i = 0; i < profilePhaseCount_; ++i) {
+        totalSec += profilePhases_[i].durationSec;
+    }
+    if (elapsed >= totalSec) {
+        manualBrew_ = false;
+    }
+}
+
 void TemperatureLoop::updateBrewState(uint32_t nowMs) {
     // Stop-on-weight drops the same flag the app's stop writes, so the shot ends
     // through one path and still gets its profile teardown and vent pulse.
@@ -480,7 +542,7 @@ void TemperatureLoop::updateBrewState(uint32_t nowMs) {
     if (active && !brewing_) {
         brewing_ = true;
         shotStartMs_ = nowMs;
-        brewSource_ = 1;
+        brewSource_ = panelShot_ ? 2 : 1;
         if (profileActive_ && profilePhaseCount_ > 0) {
             // A profile owns the whole pump program, so skip the built-in
             // pre-infusion state machine (phase 0) and start the profile at its
@@ -498,6 +560,7 @@ void TemperatureLoop::updateBrewState(uint32_t nowMs) {
     } else if (!active && brewing_) {
         brewing_ = false;
         brewSource_ = 0;
+        panelShot_ = false;
         preinfusionPhase_ = 0;
         // A profile that was commanding the block hands temperature back now
         // that the shot is over, so idle control returns to group + offset.

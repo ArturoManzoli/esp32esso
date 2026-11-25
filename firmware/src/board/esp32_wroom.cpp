@@ -40,6 +40,9 @@ const BoardConfig& activeBoard() {
                 .scaleSck = 22,        // HX711 clock, shared by both amps
                 .scaleDoutLeft = 16,   // HX711 data, left drip-tray cell
                 .scaleDoutRight = 17,  // HX711 data, right drip-tray cell
+                // Input-only, no internal pull: needs a 10k pull-up to 3V3
+                // (most opto boards carry one).
+                .brewSwitchIn = 36,
                 .i2cSda = 4,   // ADS1115 option; GPIO 21/22 are taken by the amps
                 .i2cScl = 14,
             },

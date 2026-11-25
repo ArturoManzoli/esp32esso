@@ -285,8 +285,32 @@ boards. Check the trigger spec on the listing: the board must read 3.3 V as
 off (typically "2.5 - 5 V = off"). A high-level-trigger board would hold both
 valves open whenever the machine is idle.
 
-The stock front-panel brew switch is **not** read by the firmware on this build;
-brewing is app-only unless you add a separate input later.
+Brewing is app-only unless the optional panel input below is wired.
+
+## Panel brew input (optional, no phone needed)
+
+Build with `-DESP32ESSO_PANEL_INPUTS=1` to start shots from the machine. The
+input is active low on GPIO 36 (WROOM) or GPIO 17 (S3). GPIO 36 has no internal
+pull-up, so it needs a **10 kΩ pull-up to 3V3** (most opto boards already carry
+one).
+
+- **Dedicated button.** A low-voltage push button between the pin and GND.
+  Press to start, press again to stop.
+- **Stock brew switch.** Sense it through an **optocoupler** (a PC817-type
+  board rated for mains on its input), never directly. The switch's contacts
+  must then feed **only** the opto: the pump and valve stay on the dimmer and
+  SSR, otherwise the switch and the firmware fight over the pump. An AC opto
+  only conducts on half the cycle, so add a **10 µF capacitor** from the pin to
+  GND to hold the line low while the switch is on.
+
+A press starts a shot running the stored brew profile (or the plain
+pre-infusion program when none is loaded). A second press stops it, and so does
+releasing an input that was held for at least a second, so a latching rocker
+runs the shot exactly while it is on. A panel shot always stops after
+**60 s**, and a profile shot stops at the end of its last timed phase. A rocker
+left on at power-up does not start a shot; switch it off and on again. Any press
+also re-enables a heater the inactivity timeout switched off. The app reports
+these shots as `brew switch`.
 
 > [!NOTE]
 > This is the **Standard** (Z-C + DIM) dimmer variant, not DimmerLink
