@@ -93,6 +93,11 @@ constexpr float kProfilePressKp = 0.02f;
 constexpr float kProfileMaxFlowMlS = 8.0f;
 constexpr float kProfileFlowLimitKp = 0.05f;
 
+// Granularity of the profile's temperature leg. The override is only re-applied
+// once its ramp has moved this far, so a slope does not re-log and re-arm the
+// setpoint on every 10 ms tick. Finer than the thermocouple's own resolution.
+constexpr float kProfileTempStepC = 0.2f;
+
 // Ceiling for an operator-set pressure hold: the top of the characterised pump
 // curve, since asking for more than the pump measurably delivers would just
 // peg it at full duty while reporting a target it can never reach.
@@ -193,6 +198,8 @@ void TemperatureLoop::begin(const profile::MachineProfile& profile) {
     profilePhaseIndex_ = 0;
     profilePhaseStartMs_ = 0;
     profileTempC_ = 0.0f;
+    profileTempApplied_ = false;
+    profileTempLastC_ = NAN;
     flushing_ = false;
     flushUntilMs_ = 0;
     reliefValveOpen_ = false;
@@ -358,17 +365,23 @@ void TemperatureLoop::setPumpRampSeconds(float seconds) {
 
 void TemperatureLoop::setBrewProfile(const uint8_t* data, size_t len) {
     // Wire layout mirrors BrewProfile.toWireBytes in the app (see tier1_gatt.h):
-    // an 8-byte header then N x 28-byte little-endian phase records. Anything
+    // an 8-byte header then N little-endian phase records, 28 bytes each on wire
+    // v1 and 36 on v2 (which appends the block-temperature ramp). Both are read
+    // because a v1 blob can still be restored from NVS after an update. Anything
     // that does not carry at least one complete phase clears the profile.
     constexpr size_t kHeader = 8;
-    constexpr size_t kPhase = 28;
-    if (data == nullptr || len < kHeader + kPhase) {
+    if (data == nullptr || len < kHeader) {
         clearBrewProfile();
         return;
     }
     const uint8_t version = data[0];
     uint8_t phaseCount = data[1];
-    if (version != 1 || phaseCount == 0) {
+    if ((version != 1 && version != 2) || phaseCount == 0) {
+        clearBrewProfile();
+        return;
+    }
+    const size_t kPhase = (version == 2) ? 36u : 28u;
+    if (len < kHeader + kPhase) {
         clearBrewProfile();
         return;
     }
@@ -383,6 +396,7 @@ void TemperatureLoop::setBrewProfile(const uint8_t* data, size_t len) {
     float tempC = 0.0f;
     std::memcpy(&tempC, data + 4, sizeof(float));
 
+    uint8_t tempPhases = 0;
     for (uint8_t i = 0; i < phaseCount; ++i) {
         const uint8_t* p = data + kHeader + static_cast<size_t>(i) * kPhase;
         ProfilePhaseRt& rt = profilePhases_[i];
@@ -395,23 +409,46 @@ void TemperatureLoop::setBrewProfile(const uint8_t* data, size_t len) {
         std::memcpy(&rt.durationSec, p + 16, sizeof(float));
         std::memcpy(&rt.restriction, p + 20, sizeof(float));
         std::memcpy(&rt.stopPressureAbove, p + 24, sizeof(float));
+        rt.blockTempStartC = 0.0f;
+        rt.blockTempEndC = 0.0f;
+        if (version == 2) {
+            std::memcpy(&rt.blockTempStartC, p + 28, sizeof(float));
+            std::memcpy(&rt.blockTempEndC, p + 32, sizeof(float));
+            if (std::isnan(rt.blockTempStartC)) rt.blockTempStartC = 0.0f;
+            if (std::isnan(rt.blockTempEndC)) rt.blockTempEndC = 0.0f;
+            if (rt.blockTempStartC > 0.0f || rt.blockTempEndC > 0.0f) tempPhases++;
+        }
     }
     profilePhaseCount_ = phaseCount;
     profileTempC_ = tempC;
     profileActive_ = true;
-    Serial.printf("# profile: set %u phases, temp=%.1fC\n",
-                  static_cast<unsigned>(phaseCount),
-                  static_cast<double>(tempC));
+    Serial.printf("# profile: set %u phases (v%u), temp=%.1fC, %u temp phases\n",
+                  static_cast<unsigned>(phaseCount), static_cast<unsigned>(version),
+                  static_cast<double>(tempC), static_cast<unsigned>(tempPhases));
 }
 
 void TemperatureLoop::clearBrewProfile() {
     if (profileActive_) {
         Serial.println(F("# profile: cleared"));
     }
+    releaseProfileTemperature();
     profileActive_ = false;
     profilePhaseCount_ = 0;
     profilePhaseIndex_ = 0;
     profileTempC_ = 0.0f;
+}
+
+// Hand temperature control back to the normal group + offset regime after a
+// profile has been driving the block. Only clears the override the profile
+// itself installed, so an operator's manual block setpoint set after the shot
+// is never stolen from under them.
+void TemperatureLoop::releaseProfileTemperature() {
+    if (!profileTempApplied_) {
+        return;
+    }
+    profileTempApplied_ = false;
+    profileTempLastC_ = NAN;
+    clearManualThermoblockSetpoint();
 }
 
 void TemperatureLoop::setHeaterEnabled(bool on) {
@@ -451,6 +488,7 @@ void TemperatureLoop::updateBrewState(uint32_t nowMs) {
             preinfusionPhase_ = 0;
             profilePhaseIndex_ = 0;
             profilePhaseStartMs_ = nowMs;
+            profileTempLastC_ = NAN;  // first tick installs the ramp's start
         } else {
             // Arm pre-infusion (pump-on phase) when configured; otherwise brew
             // straight away (phase 0).
@@ -461,6 +499,9 @@ void TemperatureLoop::updateBrewState(uint32_t nowMs) {
         brewing_ = false;
         brewSource_ = 0;
         preinfusionPhase_ = 0;
+        // A profile that was commanding the block hands temperature back now
+        // that the shot is over, so idle control returns to group + offset.
+        releaseProfileTemperature();
         // Arm the post-shot vent: the relief valve opens briefly now that the
         // shot has ended, to relieve puck/line pressure (see updateReliefValve).
         reliefVentUntilMs_ = nowMs + kPostShotVentMs;
@@ -608,6 +649,28 @@ void TemperatureLoop::updateProfileExecution(uint32_t nowMs) {
     const float target = profilePhaseTargetValue(ph.curve, ph.targetStart,
                                                  ph.targetEnd, ph.transitionSec,
                                                  elapsedSec);
+
+    // Temperature leg of the profile: a phase carrying block temperatures pins
+    // the thermoblock through the same manual-override path the phone uses, so
+    // the PID chases the block while the profile owns it (the group probe is far
+    // too slow to be commanded mid-shot). The ramp always runs across the whole
+    // phase duration -- unlike the pressure target, which ramps over
+    // transitionSec then holds -- so a vertex-to-vertex temperature slope is
+    // continuous. Phases with no temperature leave control untouched.
+    if (ph.blockTempStartC > 0.0f || ph.blockTempEndC > 0.0f) {
+        const float from = (ph.blockTempStartC > 0.0f) ? ph.blockTempStartC : ph.blockTempEndC;
+        const float to = (ph.blockTempEndC > 0.0f) ? ph.blockTempEndC : from;
+        float f = (ph.durationSec > 0.0f) ? elapsedSec / ph.durationSec : 1.0f;
+        if (f < 0.0f) f = 0.0f;
+        if (f > 1.0f) f = 1.0f;
+        const float want = from + (to - from) * f;
+        if (std::isnan(profileTempLastC_) ||
+            std::fabs(want - profileTempLastC_) >= kProfileTempStepC) {
+            setManualThermoblockSetpointC(want);
+            profileTempLastC_ = want;
+            profileTempApplied_ = true;
+        }
+    }
 
     // The brew valve follows the phase intent: a closed valve (e.g. a bloom /
     // soak pause) lets the puck rest with no flow, so the pump also idles.
