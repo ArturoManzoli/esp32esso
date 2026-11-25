@@ -72,9 +72,9 @@ ThermocoupleSensor g_groupTempSensor(kPins.thermocoupleCs,
                                      kPins.thermocoupleMiso);
 // Brew pump: Standard AC phase-dimmer (DIM + Z-C), not a zero-cross SSR.
 hal::AcPhaseDimmer g_pumpDimmer(kPins.pumpSsr, kPins.pumpZc);
-// Brew valve SSR, alone; activeLow matches common 5 V dual-channel SSR boards.
+// Brew and relief valve SSRs on an active-low 5 V board (GPIO LOW = on). Its
+// inputs read 2.5 V and up as off, so the 3.3 V GPIO high releases them.
 hal::GpioDiscreteOutput g_brewValveRelay(kPins.brewValveSsr, /*activeHigh=*/false);
-// Relief valve SSR; activeLow matches common 5 V dual-channel SSR boards.
 hal::GpioDiscreteOutput g_solenoidValve(kPins.solenoidValve, /*activeHigh=*/false);
 #if defined(ESP32ESSO_PRESSURE_ADC)
 // Ratiometric 0.5-4.5 V / 0-12 bar transducer through a 2:1 divider (see
