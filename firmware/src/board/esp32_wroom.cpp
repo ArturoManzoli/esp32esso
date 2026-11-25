@@ -43,6 +43,7 @@ const BoardConfig& activeBoard() {
                 // Input-only, no internal pull: needs a 10k pull-up to 3V3
                 // (most opto boards carry one).
                 .brewSwitchIn = 36,
+                .steamSwitchIn = 39,
                 .i2cSda = 4,   // ADS1115 option; GPIO 21/22 are taken by the amps
                 .i2cScl = 14,
             },

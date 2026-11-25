@@ -47,6 +47,7 @@ const MachineProfile kStubProfile = {
     .pressureSensor = nullptr,
     .scale = nullptr,
     .brewSwitch = nullptr,
+    .steamSwitch = nullptr,
 };
 }  // namespace
 

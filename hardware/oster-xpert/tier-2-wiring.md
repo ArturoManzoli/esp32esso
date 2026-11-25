@@ -312,6 +312,20 @@ left on at power-up does not start a shot; switch it off and on again. Any press
 also re-enables a heater the inactivity timeout switched off. The app reports
 these shots as `brew switch`.
 
+### Steam input
+
+The same build flag adds a steam input, active low on GPIO 39 (WROOM, needs the
+same external pull-up) or GPIO 18 (S3), wired the same way: a low-voltage
+switch to GND, or the stock steam switch through an opto with the 10 µF
+capacitor. While it is on, the heater holds the steam setpoint from the app's
+settings (145 °C by default) instead of the brew target, and shots are
+refused. Switching it off returns to brew temperature, and so does leaving it
+on for **5 minutes**; after a timeout, switch it off and on again to steam once
+more. Unlike the brew input, a steam switch already on at power-up starts steam
+mode. The stock thermostat in the heater circuit must allow steam temperature
+in this position, as it does with the stock steam switch wiring; otherwise it
+cuts the heater first. `MachineState.steaming` reports the mode.
+
 > [!NOTE]
 > This is the **Standard** (Z-C + DIM) dimmer variant, not DimmerLink
 > (UART/I2C). Older Tier 2 builds used a zero-cross pump SSR on GPIO 32 alone;

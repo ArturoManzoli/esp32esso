@@ -38,6 +38,7 @@ const BoardConfig& activeBoard() {
                 .scaleDoutLeft = 15,   // HX711 data, left drip-tray cell
                 .scaleDoutRight = 16,  // HX711 data, right drip-tray cell
                 .brewSwitchIn = 17,
+                .steamSwitchIn = 18,
                 .i2cSda = 1,  // ADS1115 option
                 .i2cScl = 2,
             },

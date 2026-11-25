@@ -99,9 +99,10 @@ struct MachineProfile {
     // hardware is installed and the build enables ESP32ESSO_SCALE_HX711.
     hal::DualHx711Scale* scale;
 
-    // Tier 2 - optional panel brew input, so a shot can start without the
+    // Tier 2 - optional panel inputs, so a shot or steam can start without the
     // phone (ESP32ESSO_PANEL_INPUTS). nullptr when not wired.
     hal::DiscreteInput* brewSwitch;
+    hal::DiscreteInput* steamSwitch;
 };
 
 // Selected at link time by the build env via the matching profile env-flag.

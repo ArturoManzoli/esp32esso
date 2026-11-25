@@ -94,6 +94,7 @@ MachineStateWire packState(uint32_t nowMs) {
         state.flushing = g_loop->flushing() ? 1 : 0;
         state.thermoblock_manual = g_loop->thermoblockManualActive() ? 1 : 0;
         state.pressure_manual = g_loop->pressureManualActive() ? 1 : 0;
+        state.steaming = g_loop->steaming() ? 1 : 0;
         state.pressure_setpoint_bar = g_loop->pressureManualActive()
                                           ? g_loop->manualPressureBar()
                                           : NAN;

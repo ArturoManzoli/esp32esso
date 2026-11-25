@@ -22,6 +22,10 @@ constexpr uint32_t kPostShotVentMs = 4000;   // relief-valve vent pulse after a 
 constexpr uint32_t kBrewSwitchHoldMs = 1000;
 constexpr uint32_t kPanelShotMaxMs = 60UL * 1000UL;
 
+// A steam session left on returns to brew temperature after this long, so a
+// forgotten switch does not hold the boiler at steam temperature indefinitely.
+constexpr uint32_t kSteamMaxMs = 5UL * 60UL * 1000UL;
+
 // Pump soft-start (pressure ramp). With a phase-angle dimmer the duty is
 // conduction angle; the legacy zero-cross SSR path still time-proportions
 // across kPumpRampWindowMs (10 Hz). kPumpRampStartDuty is the duty at the
@@ -197,6 +201,8 @@ void TemperatureLoop::begin(const profile::MachineProfile& profile) {
     brewSwitchPrimed_ = false;
     brewSwitchOn_ = false;
     panelShot_ = false;
+    steamSwitchOn_ = false;
+    steaming_ = false;
     preinfusionPhase_ = 0;
     preinfusionPhaseStartMs_ = 0;
     pumpRampSec_ = 0.0f;
@@ -248,6 +254,7 @@ void TemperatureLoop::tick(uint32_t nowMs) {
     // tick's sample rather than the previous one.
     updateScale();
     updateBrewSwitch(nowMs);
+    updateSteamSwitch(nowMs);
     updateBrewState(nowMs);
     updatePreinfusion(nowMs);
     updateFlush(nowMs);
@@ -529,6 +536,26 @@ void TemperatureLoop::updateBrewSwitch(uint32_t nowMs) {
     }
 }
 
+void TemperatureLoop::updateSteamSwitch(uint32_t nowMs) {
+    if (profile_->steamSwitch == nullptr) {
+        return;
+    }
+    const bool on = profile_->steamSwitch->read();
+    if (on && !steamSwitchOn_) {
+        steaming_ = true;
+        steamSinceMs_ = nowMs;
+        setHeaterEnabled(true);
+        Serial.printf("# steam: on, target %.1f C\n", static_cast<double>(steamSetpoint_));
+    } else if (!on && steaming_) {
+        steaming_ = false;
+        Serial.println(F("# steam: off"));
+    } else if (steaming_ && (nowMs - steamSinceMs_) >= kSteamMaxMs) {
+        steaming_ = false;
+        Serial.println(F("# steam: timed out, back to brew temperature"));
+    }
+    steamSwitchOn_ = on;
+}
+
 void TemperatureLoop::updateBrewState(uint32_t nowMs) {
     // Stop-on-weight drops the same flag the app's stop writes, so the shot ends
     // through one path and still gets its profile teardown and vent pulse.
@@ -537,6 +564,13 @@ void TemperatureLoop::updateBrewState(uint32_t nowMs) {
         if (!std::isnan(total) && total >= targetWeightG_) {
             manualBrew_ = false;
         }
+    }
+    // No shot at steam temperature: water through the group would flash to
+    // steam at the puck.
+    if (manualBrew_ && !brewing_ && steaming_) {
+        manualBrew_ = false;
+        panelShot_ = false;
+        Serial.println(F("# brew: refused while steaming"));
     }
     const bool active = manualBrew_;
     if (active && !brewing_) {
@@ -1056,7 +1090,7 @@ void TemperatureLoop::updateHeaterTimeout(uint32_t nowMs) {
     }
     // A running shot (or the tuning/cal bench) counts as continuous activity so
     // the machine is never cut mid-operation.
-    if (brewing_ || tuning_.active || cal_.active) {
+    if (brewing_ || steaming_ || tuning_.active || cal_.active) {
         lastActivityMs_ = nowMs;
     }
     if (heaterTimeoutMin_ <= 0.0f || !heaterEnabled_) {
@@ -1073,6 +1107,9 @@ void TemperatureLoop::updateHeaterTimeout(uint32_t nowMs) {
 
 float TemperatureLoop::computeThermoblockSetpoint() const {
     const float hardCeil = profile_->thermal.maxSafeTempC - 5.0f;
+    if (steaming_) {
+        return (steamSetpoint_ > hardCeil) ? hardCeil : steamSetpoint_;
+    }
     // Manual override wins: hold the thermoblock at the absolute temperature the
     // operator dialed in, regardless of the group setpoint or offset.
     if (manualThermoblockActive_ && !std::isnan(manualThermoblockSetpoint_)) {
@@ -1169,7 +1206,7 @@ void TemperatureLoop::runPidIfDue(uint32_t nowMs) {
     // its derived setpoint, which is also the graceful safety path. The block
     // sensor's fault/overtemp latch above still guards safety in every mode.
     const bool groupDirect =
-        hasGroupSensor() && groupOk_ && !manualThermoblockActive_;
+        hasGroupSensor() && groupOk_ && !manualThermoblockActive_ && !steaming_;
     const float controlSetpoint = groupDirect ? setpoint_ : thermoblockSetpoint_;
     const float controlPv = groupDirect ? groupTempC_ : temp;
 
