@@ -45,6 +45,7 @@ struct BoardPins {
     uint8_t scaleSck;        // Tier 4 HX711 clock, shared by both amps
     uint8_t scaleDoutLeft;   // Tier 4 HX711 data, drip-tray load cell (left edge)
     uint8_t scaleDoutRight;  // Tier 4 HX711 data, drip-tray load cell (right edge)
+    uint8_t brewSwitchIn;  // optional panel brew input (ESP32ESSO_PANEL_INPUTS)
     uint8_t i2cSda;  // optional ADS1115 pressure ADC (ESP32ESSO_PRESSURE_ADS1115)
     uint8_t i2cScl;
 };

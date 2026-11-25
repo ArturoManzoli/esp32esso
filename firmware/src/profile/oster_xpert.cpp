@@ -4,6 +4,9 @@
 
 #include "board/board_config.h"
 #include "hal/gpio_discrete_output.h"
+#if defined(ESP32ESSO_PANEL_INPUTS)
+#include "hal/gpio_discrete_input.h"
+#endif
 #if defined(ESP32ESSO_PRESSURE_ADC)
 #include "hal/analog_pressure_sensor.h"
 #elif defined(ESP32ESSO_PRESSURE_ADS1115)
@@ -87,6 +90,11 @@ hal::AnalogPressureSensor g_pressureSensor(kPins.pressureAdc);
 // Same transducer and divider, digitised by an ADS1115 on AIN0 instead.
 hal::Ads1115PressureSensor g_pressureSensor(kPins.i2cSda, kPins.i2cScl);
 #endif
+#endif
+
+#if defined(ESP32ESSO_PANEL_INPUTS)
+// Active low: a button or an opto output pulls the pin to GND.
+hal::GpioDiscreteInput g_brewSwitch(kPins.brewSwitchIn);
 #endif
 
 #if defined(ESP32ESSO_SCALE_HX711)
@@ -175,6 +183,11 @@ const MachineProfile kOsterXpertProfile = {
 #else
     .scale = nullptr,
 #endif
+#if defined(ESP32ESSO_PANEL_INPUTS)
+    .brewSwitch = &g_brewSwitch,
+#else
+    .brewSwitch = nullptr,
+#endif
 };
 
 }  // namespace
@@ -222,6 +235,9 @@ void initActiveProfilePeripherals() {
 #endif
 #if defined(ESP32ESSO_SCALE_HX711)
     g_dripTrayScale.begin();
+#endif
+#if defined(ESP32ESSO_PANEL_INPUTS)
+    g_brewSwitch.begin();
 #endif
 }
 

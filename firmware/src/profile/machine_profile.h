@@ -98,6 +98,10 @@ struct MachineProfile {
     // Tier 4 - drip-tray scale (two load cells summed). nullptr until the
     // hardware is installed and the build enables ESP32ESSO_SCALE_HX711.
     hal::DualHx711Scale* scale;
+
+    // Tier 2 - optional panel brew input, so a shot can start without the
+    // phone (ESP32ESSO_PANEL_INPUTS). nullptr when not wired.
+    hal::DiscreteInput* brewSwitch;
 };
 
 // Selected at link time by the build env via the matching profile env-flag.

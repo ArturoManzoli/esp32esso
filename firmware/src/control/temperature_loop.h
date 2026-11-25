@@ -96,8 +96,8 @@ public:
     void setSteamSetpointCelsius(float c);
     float steamSetpointCelsius() const { return steamSetpoint_; }
 
-    // Shot timer: brewing is true while a manual shot is active over BLE.
-    // brewSource: 0 idle, 1 manual (app).
+    // Shot timer: brewing is true while a shot is active. brewSource: 0 idle,
+    // 1 manual (app), 2 panel brew input (see updateBrewSwitch).
     //
     // `useProfile` picks what shapes the pump for this shot: true runs the
     // loaded brew profile, false runs the plain pre-infusion + soft-start ramp
@@ -275,6 +275,7 @@ private:
     void runTuningStep(uint32_t nowMs);
     void runCalibrationStep(uint32_t nowMs);
     void updateSlowPwm(uint32_t nowMs);
+    void updateBrewSwitch(uint32_t nowMs);
     void updateBrewState(uint32_t nowMs);
     void updatePreinfusion(uint32_t nowMs);
     void updateFlush(uint32_t nowMs);
@@ -336,6 +337,13 @@ private:
     bool brewUseProfile_ = true;  // latched at shot start (see setManualBrew)
     uint8_t brewSource_ = 0;
     uint32_t shotStartMs_ = 0;
+
+    // Panel brew input (see updateBrewSwitch). The first read only records the
+    // level, so a rocker left on does not start a shot at power-up.
+    bool brewSwitchPrimed_ = false;
+    bool brewSwitchOn_ = false;
+    uint32_t brewSwitchSinceMs_ = 0;
+    bool panelShot_ = false;  // the running shot was started from the panel
 
     // Pre-infusion (see setPreinfusionSeconds)
     float preinfusionSec_ = 2.0f;

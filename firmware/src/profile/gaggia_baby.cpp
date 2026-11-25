@@ -120,6 +120,7 @@ const MachineProfile kGaggiaBabyProfile = {
     .pressureSensor = nullptr,
 #endif
     .scale = nullptr,
+    .brewSwitch = nullptr,
 };
 
 }  // namespace
